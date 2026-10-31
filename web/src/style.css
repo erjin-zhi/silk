@@ -1,0 +1,317 @@
+/* Silk 预览样式：跟随系统字体、颜色和深浅色。 */
+
+:root {
+  color-scheme: light dark;
+  --text: -apple-system-label;
+  --text-2: -apple-system-secondary-label;
+  --text-3: -apple-system-tertiary-label;
+  --bg: -apple-system-text-background;
+  --line: -apple-system-separator;
+  --fill: color-mix(in srgb, -apple-system-label 5%, transparent);
+  --fill-2: color-mix(in srgb, -apple-system-label 8%, transparent);
+  --accent: -apple-system-control-accent;
+  --link: -apple-system-link;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 10px;
+
+  --note: -apple-system-blue;
+  --tip: -apple-system-green;
+  --important: -apple-system-purple;
+  --warning: -apple-system-orange;
+  --caution: -apple-system-red;
+  --success: -apple-system-green;
+  --question: -apple-system-teal;
+  --example: -apple-system-indigo;
+  --quote: -apple-system-gray;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  font: 16px/1.72 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-feature-settings: "kern";
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+}
+
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+.markdown-body {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 36px 48px 40vh;
+}
+
+body[data-mode="split"] .markdown-body { padding: 28px 32px 40vh; }
+
+.markdown-body.empty::before {
+  content: "空文档";
+  display: block;
+  margin-top: 30vh;
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* 每个顶层块包一层 .blk，只用来增量更新，不影响排版。 */
+.blk { display: flow-root; }
+.blk > :first-child { margin-top: 0; }
+.blk > :last-child { margin-bottom: 0; }
+.blk + .blk { margin-top: 1em; }
+
+/* ---------- 正文 ---------- */
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 1.6em 0 0.6em;
+  line-height: 1.3;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  scroll-margin-top: 16px;
+}
+/* 页内跳转的目标（原生 HTML 锚点、脚注）和标题一样，上方留点空。 */
+[id], a[name] { scroll-margin-top: 16px; }
+.blk.blk-h { margin-top: 1.8em; }
+.blk.blk-h:first-child { margin-top: 0; }
+h1 { font-size: 2em; font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.25em; }
+h4 { font-size: 1.05em; }
+h5, h6 { font-size: 0.95em; color: var(--text-2); }
+
+p, ul, ol, dl, table, pre, blockquote, details, .code-block, .callout { margin: 0 0 1em; }
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+a.wikilink { border-bottom: 1px dashed color-mix(in srgb, var(--link) 50%, transparent); }
+a.wikilink:hover { text-decoration: none; border-bottom-style: solid; }
+
+strong { font-weight: 650; }
+mark { background: color-mix(in srgb, -apple-system-yellow 40%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+del { color: var(--text-2); }
+kbd {
+  font: 0.82em var(--mono);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--fill);
+}
+
+hr { height: 1px; margin: 2em 0; border: 0; background: var(--line); }
+
+img, video { max-width: 100%; border-radius: 6px; }
+
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.2em 0; }
+li > ul, li > ol { margin: 0.2em 0; }
+li > p { margin: 0.4em 0; }
+
+.task-list-container { padding-left: 0.4em; list-style: none; }
+.task-list-item { list-style: none; }
+.task-list-item-checkbox { margin: 0 0.5em 0 -0.1em; vertical-align: -0.1em; accent-color: var(--accent); }
+
+blockquote {
+  padding: 0.1em 0 0.1em 1em;
+  color: var(--text-2);
+  border-left: 3px solid var(--line);
+}
+
+/* ---------- 代码 ---------- */
+
+code {
+  font: 0.86em/1.5 var(--mono);
+  padding: 0.15em 0.35em;
+  border-radius: 5px;
+  background: var(--fill-2);
+}
+
+.code-block {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--fill);
+  overflow: hidden;
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 8px 0 14px;
+  font: 12px -apple-system, sans-serif;
+  color: var(--text-2);
+}
+.code-lang:empty::before { content: "代码"; color: var(--text-3); }
+
+.copy-btn {
+  border: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text-2);
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+.code-block:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--fill-2); color: var(--text); }
+
+pre {
+  margin: 0;
+  padding: 0 14px 12px;
+  overflow-x: auto;
+  font: 13px/1.6 var(--mono);
+  tab-size: 4;
+}
+pre code { padding: 0; background: none; font-size: inherit; }
+
+/* ---------- 表格 ---------- */
+
+table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.94em;
+  font-variant-numeric: tabular-nums;
+}
+th, td { padding: 7px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { font-weight: 600; background: var(--fill); }
+tr:nth-child(2n) td { background: color-mix(in srgb, -apple-system-label 2.5%, transparent); }
+
+/* ---------- 提示块 ---------- */
+
+.callout {
+  --c: var(--note);
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--c);
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+}
+.callout-tip { --c: var(--tip); }
+.callout-important { --c: var(--important); }
+.callout-warning { --c: var(--warning); }
+.callout-caution { --c: var(--caution); }
+.callout-success { --c: var(--success); }
+.callout-question { --c: var(--question); }
+.callout-example { --c: var(--example); }
+.callout-quote { --c: var(--quote); }
+
+.callout-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--c);
+}
+summary.callout-title { cursor: pointer; list-style: none; }
+summary.callout-title::-webkit-details-marker { display: none; }
+summary.callout-title::after { content: "›"; margin-left: auto; transition: transform 0.15s; font-size: 1.2em; }
+details.callout[open] > summary.callout-title::after { transform: rotate(90deg); }
+.callout-icon { width: 16px; height: 16px; flex: none; }
+.callout-body > :first-child { margin-top: 0.4em; }
+.callout-body > :last-child { margin-bottom: 0; }
+.callout-body:empty { display: none; }
+
+/* ---------- 文件头 ---------- */
+
+.front-matter {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.88em;
+  overflow: hidden;
+}
+.front-matter > summary {
+  padding: 6px 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.front-matter[open] > summary { border-bottom: 1px solid var(--line); }
+.front-matter table { display: table; width: 100%; margin: 0; font-size: 1em; }
+.front-matter th, .front-matter td { border: 0; padding: 5px 12px; background: none !important; }
+.front-matter th { width: 1%; white-space: nowrap; color: var(--text-2); font-weight: 500; }
+.front-matter pre { padding: 10px 12px; }
+.chip {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  font-size: 0.95em;
+}
+
+/* ---------- 其他 ---------- */
+
+details:not(.callout):not(.front-matter) {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+details:not(.callout):not(.front-matter) > summary { cursor: pointer; font-weight: 500; }
+details[open]:not(.callout):not(.front-matter) > summary { margin-bottom: 0.5em; }
+
+.katex-display { margin: 0 0 1em; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.katex { font-size: 1.08em; }
+
+.mermaid-block { margin: 0 0 1em; text-align: center; }
+.mermaid-block svg { max-width: 100%; height: auto; }
+.mermaid-block .mermaid-src { text-align: left; color: var(--text-3); padding: 12px 14px; border-radius: var(--radius); background: var(--fill); }
+.mermaid-block.error .mermaid-src { color: var(--text-2); }
+.mermaid-error { margin: 6px 0 0; font-size: 12px; color: -apple-system-red; text-align: left; }
+
+.footnotes { font-size: 0.88em; color: var(--text-2); }
+.footnotes-sep { margin: 2.5em 0 1em; }
+.footnote-ref a { font-size: 0.8em; }
+
+/* 对照模式：光标所在块 */
+body[data-mode="split"] .blk { cursor: text; }
+.cursor-block {
+  border-radius: 4px;
+  box-shadow: -14px 0 0 -11px var(--accent);
+}
+
+/* ---------- 代码高亮：GitHub 风格 ---------- */
+
+.hljs-comment, .hljs-quote { color: #6e7781; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-type, .hljs-template-tag, .hljs-meta .hljs-keyword { color: #cf222e; }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: #0a3069; }
+.hljs-number, .hljs-literal, .hljs-variable.constant_, .hljs-attr, .hljs-attribute, .hljs-symbol, .hljs-operator { color: #0550ae; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: #8250df; }
+.hljs-title.class_, .hljs-built_in, .hljs-selector-class, .hljs-selector-id { color: #953800; }
+.hljs-name, .hljs-tag, .hljs-selector-pseudo { color: #116329; }
+.hljs-params, .hljs-variable, .hljs-property { color: inherit; }
+.hljs-meta { color: #57606a; }
+.hljs-addition { color: #116329; background: #dafbe1; }
+.hljs-deletion { color: #82071e; background: #ffebe9; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+@media (prefers-color-scheme: dark) {
+  .hljs-comment, .hljs-quote { color: #8b949e; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-type, .hljs-template-tag, .hljs-meta .hljs-keyword { color: #ff7b72; }
+  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: #a5d6ff; }
+  .hljs-number, .hljs-literal, .hljs-variable.constant_, .hljs-attr, .hljs-attribute, .hljs-symbol, .hljs-operator { color: #79c0ff; }
+  .hljs-title, .hljs-title.function_, .hljs-section { color: #d2a8ff; }
+  .hljs-title.class_, .hljs-built_in, .hljs-selector-class, .hljs-selector-id { color: #ffa657; }
+  .hljs-name, .hljs-tag, .hljs-selector-pseudo { color: #7ee787; }
+  .hljs-meta { color: #8b949e; }
+  .hljs-addition { color: #aff5b4; background: #033a16; }
+  .hljs-deletion { color: #ffdcd7; background: #67060c; }
+}
+
+@media print {
+  .markdown-body { max-width: none; padding: 0; }
+  .copy-btn { display: none; }
+  .code-block, .callout, table, img { break-inside: avoid; }
+}

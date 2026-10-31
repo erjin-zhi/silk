@@ -1,0 +1,22 @@
+{
+  "name": "silk-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@mdit/plugin-mark": "^2.1.3",
+    "@mdit/plugin-tasklist": "^1.1.4",
+    "@mdit/plugin-tex": "^1.1.3",
+    "highlight.js": "^11.12.0",
+    "katex": "^0.19.1",
+    "markdown-it": "^15.0.3",
+    "markdown-it-footnote": "^4.0.0",
+    "mermaid": "^12.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
