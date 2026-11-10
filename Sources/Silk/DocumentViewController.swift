@@ -36,7 +36,8 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
     private static let zoomKey = "zoom"
 
     init() {
-        mode = ViewMode(rawValue: UserDefaults.standard.string(forKey: Self.modeKey) ?? "") ?? .read
+        // 没选过模式时用对照（左边写、右边预览）；选过就用上次的。
+        mode = ViewMode(rawValue: UserDefaults.standard.string(forKey: Self.modeKey) ?? "") ?? .split
         let savedZoom = UserDefaults.standard.double(forKey: Self.zoomKey)
         zoom = savedZoom > 0 ? savedZoom : 1
         editor = EditorView(fontSize: 13 * zoom)

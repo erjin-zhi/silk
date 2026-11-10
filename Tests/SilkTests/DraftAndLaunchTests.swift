@@ -51,6 +51,31 @@ import Testing
         closeAll(app)
     }
 
+    /// 窗口位置、侧栏的记忆由系统按 autosave 名字存在全局偏好里，测试进程里别的测试的窗口也在写，
+    /// 这里只测确定的部分：放到屏幕正中的算法、没选过模式时的默认模式。
+    @Test func 第一次打开的窗口放在屏幕可用区域的正中() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500), styleMask: [.titled], backing: .buffered, defer: true)
+        WorkspaceWindowController.centerOnScreen(window)
+        let area = try #require((window.screen ?? NSScreen.main)?.visibleFrame)
+        #expect(abs(window.frame.midX - area.midX) <= 1)
+        #expect(abs(window.frame.midY - area.midY) <= 1)
+    }
+
+    @Test func 屏幕放不下默认大小时_缩到可用区域里再居中() throws {
+        let area = try #require(NSScreen.main?.visibleFrame)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: area.width * 2, height: area.height * 2), styleMask: [.titled], backing: .buffered, defer: true)
+        WorkspaceWindowController.centerOnScreen(window)
+        #expect(window.frame.width <= area.width && window.frame.height <= area.height)
+        #expect(abs(window.frame.midX - area.midX) <= 1)
+    }
+
+    @Test func 没选过模式时默认是对照模式() {
+        let saved = UserDefaults.standard.string(forKey: "viewMode")
+        UserDefaults.standard.removeObject(forKey: "viewMode")
+        defer { UserDefaults.standard.set(saved, forKey: "viewMode") }
+        #expect(DocumentViewController().mode == .split)
+    }
+
     @Test func 有上次的状态就恢复上次打开的文件夹和文件_不开草稿() {
         let env = Env()
         env.dir.write("notes/a.md", "# A")

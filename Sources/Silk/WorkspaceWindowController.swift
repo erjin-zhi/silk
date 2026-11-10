@@ -39,6 +39,20 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     /// 草稿存储时默认放到哪个文件夹：从哪个文件夹窗口新建的，就默认存回那里。
     var saveDirectory: URL?
 
+    static let frameAutosaveName = "SilkWindow"
+
+    /// 放在屏幕可用区域（去掉菜单栏和程序坞）的正中。NSWindow.center() 会偏上一些，不是正中。
+    /// 屏幕放不下默认大小时缩到可用区域的九成。
+    static func centerOnScreen(_ window: NSWindow) {
+        guard let area = (window.screen ?? NSScreen.main)?.visibleFrame else { window.center(); return }
+        var frame = window.frame
+        frame.size.width = min(frame.width, area.width * 0.9)
+        frame.size.height = min(frame.height, area.height * 0.9)
+        frame.origin.x = (area.midX - frame.width / 2).rounded()
+        frame.origin.y = (area.midY - frame.height / 2).rounded()
+        window.setFrame(frame, display: false)
+    }
+
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let quickOpenItem = NSToolbarItem.Identifier("quickOpen")
     private static let newDraftItem = NSToolbarItem.Identifier("newDraft")
@@ -70,13 +84,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(contentItem)
         let hasSavedSidebar = UserDefaults.standard.object(forKey: "NSSplitView Subview Frames SilkSidebar") != nil
-        // 草稿窗口收起侧栏，也不记侧栏状态（不然普通窗口的侧栏也跟着收起来）。
-        if !draft { splitController.splitView.autosaveName = "SilkSidebar" }
+        // 侧栏宽度和收起/展开所有窗口（含草稿）共用一份记忆（系统按 autosaveName 自动存取）：
+        // 第一次打开时展开，之后照上次的样子。
+        splitController.splitView.autosaveName = "SilkSidebar"
         window.contentViewController = splitController
         window.setContentSize(NSSize(width: 1180, height: 780))
-        if draft {
-            sidebarItem.isCollapsed = true
-        } else if !hasSavedSidebar {
+        if !hasSavedSidebar {
             splitController.splitView.setPosition(250, ofDividerAt: 0)
         }
 
@@ -88,8 +101,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         window.toolbar = toolbar
         window.delegate = self
 
-        if !window.setFrameUsingName("SilkWindow") { window.center() }
-        window.setFrameAutosaveName("SilkWindow")
+        // 第一次打开放在屏幕正中；之后用上次的位置和大小（关窗、移动、缩放时系统自动记下）。
+        if !window.setFrameUsingName(Self.frameAutosaveName) { Self.centerOnScreen(window) }
+        window.setFrameAutosaveName(Self.frameAutosaveName)
 
         sidebar.onSelect = { [weak self] url in self?.openFile(url) }
         docView.onDirtyChange = { [weak self] dirty in self?.window?.isDocumentEdited = dirty }
