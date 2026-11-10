@@ -31,14 +31,13 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         config.setURLSchemeHandler(FileSchemeHandler(), forURLScheme: "silk-file")
         config.suppressesIncrementalRendering = false
         config.preferences.isElementFullscreenEnabled = false
-        webView = WKWebView(frame: .zero, configuration: config)
+        webView = PreviewWebView(frame: .zero, configuration: config)
         super.init()
 
         config.userContentController.add(MessageProxy(self), name: "silk")
         webView.navigationDelegate = self
         webView.allowsMagnification = true
         webView.allowsBackForwardNavigationGestures = false
-        webView.underPageBackgroundColor = .textBackgroundColor
         webView.setAccessibilityLabel("Markdown 预览")
         webView.load(URLRequest(url: URL(string: "silk://app/index.html")!))
     }
@@ -268,6 +267,28 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         sentText = nil
         if let doc = lastDocument { pendingDocument = (doc.text, doc.base, 0, nil) }
         webView.reload()
+    }
+}
+
+/// 预览用的 WKWebView。underPageBackgroundColor 设进去时就被换成了固定颜色，不会跟着系统深浅色变：
+/// 白天以浅色打开、晚上系统自动切到深色后，顶部工具栏下面那条还是浅色。所以外观一变就按新外观重设一次。
+final class PreviewWebView: WKWebView {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBackground()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyBackground()
+    }
+
+    func applyBackground() {
+        var color = NSColor.textBackgroundColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = NSColor.textBackgroundColor.usingColorSpace(.sRGB) ?? color
+        }
+        underPageBackgroundColor = color
     }
 }
 

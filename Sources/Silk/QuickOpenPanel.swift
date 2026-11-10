@@ -2,9 +2,11 @@ import AppKit
 
 /// ⇧⌘O 快速打开：输入几个字母模糊匹配文件路径，回车打开。
 @MainActor
-final class QuickOpenPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate {
+final class QuickOpenPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSWindowDelegate {
     private var panel: NSPanel?
-    private let field = NSSearchField()
+    // 用普通输入框加单独的放大镜图标：NSSearchField 去掉边框后，自带的放大镜会压在文字和光标上。
+    private let field = NSTextField()
+    private let searchIcon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)!)
     private let table = NSTableView()
     private var files: [FileNode] = []
     private var results: [(node: FileNode, path: String)] = []
@@ -57,9 +59,18 @@ final class QuickOpenPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate
         field.font = .systemFont(ofSize: 17)
         field.focusRingType = .none
         field.isBordered = false
+        field.isBezeled = false
         field.drawsBackground = false
+        field.usesSingleLineMode = true
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
         field.delegate = self
         field.translatesAutoresizingMaskIntoConstraints = false
+        field.setAccessibilityLabel("快速打开")
+
+        searchIcon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+        searchIcon.contentTintColor = .secondaryLabelColor
+        searchIcon.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: .init("file"))
         table.addTableColumn(column)
@@ -85,12 +96,16 @@ final class QuickOpenPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
+        content.addSubview(searchIcon)
         content.addSubview(field)
         content.addSubview(separator)
         content.addSubview(scroll)
         NSLayoutConstraint.activate([
             field.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            field.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            searchIcon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            searchIcon.centerYAnchor.constraint(equalTo: field.centerYAnchor),
+            searchIcon.widthAnchor.constraint(equalToConstant: 20),
+            field.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 10),
             field.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             separator.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 12),
             separator.leadingAnchor.constraint(equalTo: content.leadingAnchor),

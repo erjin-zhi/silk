@@ -51,7 +51,10 @@ enum DebugHooks {
 
     private static func handle(_ info: [String: String]) {
         let candidates = [NSApp.mainWindow, NSApp.keyWindow].compactMap { $0 } + NSApp.orderedWindows
-        let window = candidates.first { $0.windowController is WorkspaceWindowController && $0.isVisible }
+        // 可以用 window=标题 指定窗口，不指定就用当前窗口。
+        let window = candidates.first {
+            $0.windowController is WorkspaceWindowController && $0.isVisible && (info["window"] == nil || $0.title == info["window"])
+        }
         let controller = window?.windowController as? WorkspaceWindowController
         switch info["action"] {
         case "snapshot":
@@ -98,6 +101,73 @@ enum DebugHooks {
             NSApp.activate()
             window?.makeKeyAndOrderFront(nil)
             controller?.quickOpen(nil)
+        case "ime":
+            // 模拟输入法：先出拼音（marked text），再上屏成汉字。
+            guard let tv = findEditor(in: window?.contentView)?.textView else { return }
+            let pinyin = info["pinyin"] ?? "nihao"
+            for i in 1...pinyin.count {
+                tv.setMarkedText(String(pinyin.prefix(i)), selectedRange: NSRange(location: i, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+            tv.insertText(info["text"] ?? "你好", replacementRange: NSRange(location: NSNotFound, length: 0))
+        case "editorState":
+            guard let path = info["path"], let editor = findEditor(in: window?.contentView) else { return }
+            let tv = editor.textView
+            tv.layoutManager?.ensureLayout(for: tv.textContainer!)
+            let used = tv.layoutManager.map { $0.usedRect(for: tv.textContainer!) } ?? .zero
+            let glyphs = tv.layoutManager?.numberOfGlyphs ?? -1
+            let attrs = tv.textStorage!.length > 0 ? tv.textStorage!.attributes(at: 0, effectiveRange: nil) : [:]
+            let color = (attrs[.foregroundColor] as? NSColor).map { "\($0)" } ?? "nil"
+            let extra = "glyphs=\(glyphs) color=\(color) container=\(tv.textContainer?.size ?? .zero) marked=\(tv.markedRange())"
+            if let shot = info["shot"], let rep = editor.bitmapImageRepForCachingDisplay(in: editor.bounds) {
+                editor.cacheDisplay(in: editor.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: shot))
+            }
+            let state = "string=[\(tv.string)] visible=\(editor.contentView.bounds) used=\(used) frame=\(tv.frame) topLine=\(editor.topLine) firstResponder=\(window?.firstResponder === tv) \(extra)"
+            try? state.write(toFile: path, atomically: true, encoding: .utf8)
+        case "appearance":
+            // 切换外观，模拟系统在白天 / 夜间之间自动切换：{"action": "appearance", "mode": "dark"}
+            NSApp.appearance = NSAppearance(named: info["mode"] == "dark" ? .darkAqua : .aqua)
+        case "toggleSidebar":
+            (window?.contentViewController as? NSSplitViewController)?.toggleSidebar(nil)
+        case "sidebarNew":
+            // 点侧栏底部的「新建」。
+            func find(_ v: NSView?) -> NSButton? {
+                guard let v else { return nil }
+                if let b = v as? NSButton, b.title == "新建" { return b }
+                for sub in v.subviews { if let f = find(sub) { return f } }
+                return nil
+            }
+            if let button = find(window?.contentView) {
+                var chain: [String] = []
+                var v: NSView? = button
+                while let view = v { if view.isHidden { chain.append("\(type(of: view)) hidden") }; v = view.superview }
+                log("侧栏新建按钮 window=\(button.window?.title ?? "-") frame=\(button.convert(button.bounds, to: nil)) hidden=\(button.isHiddenOrHasHiddenAncestor) \(chain)")
+                button.performClick(nil)
+            } else {
+                log("没找到侧栏新建按钮")
+            }
+        case "toolbarClick":
+            // 点一下工具栏按钮：{"action": "toolbarClick", "item": "newDraft"}
+            guard let item = window?.toolbar?.items.first(where: { $0.itemIdentifier.rawValue == info["item"] }),
+                  let action = item.action else { return }
+            NSApp.sendAction(action, to: item.target, from: item)
+        case "terminate":
+            NSApp.terminate(nil)
+        case "quickopenLayout":
+            // 快速打开面板里各部件的位置，检查有没有重叠。
+            guard let path = info["path"], let panel = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible }),
+                  let root = panel.contentView else { return }
+            var lines: [String] = []
+            func walk(_ v: NSView) {
+                if v is NSImageView || v is NSTextField {
+                    let frame = v.convert(v.bounds, to: nil)
+                    let text = (v as? NSTextField).map { "text=\($0.stringValue) placeholder=\($0.placeholderString ?? "")" } ?? "image"
+                    if frame.maxY > root.bounds.height - 70 { lines.append("\(type(of: v)) \(frame) \(text)") }
+                }
+                v.subviews.forEach(walk)
+            }
+            walk(root)
+            try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
         case "quickopenType":
             // 在快速打开的输入框里输入并回车。
             guard let panel = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible }),
@@ -106,7 +176,9 @@ enum DebugHooks {
             if info["enter"] == "1" { field.doCommand(by: #selector(NSResponder.insertNewline(_:))) }
         case "windows":
             guard let path = info["path"] else { return }
-            let list = NSApp.windows.map { "\(type(of: $0)) visible=\($0.isVisible) key=\($0.isKeyWindow) title=\($0.title) frame=\($0.frame)" }
+            let list = ["app hidden=\(NSApp.isHidden) active=\(NSApp.isActive)"] + NSApp.windows.map {
+                "\(type(of: $0)) visible=\($0.isVisible) key=\($0.isKeyWindow) title=\($0.title) frame=\($0.frame) mini=\($0.isMiniaturized) onScreen=\($0.isOnActiveSpace)"
+            }
             try? list.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
         case "dump":
             guard let window, let path = info["path"] else { return }
@@ -121,6 +193,9 @@ enum DebugHooks {
         var lines: [String] = []
         lines.append("title: \(window.title) | subtitle: \(window.subtitle) | edited: \(window.isDocumentEdited)")
         lines.append("frame: \(window.frame) safeTop: \(window.contentView?.safeAreaInsets.top ?? -1)")
+        if let split = window.contentViewController as? NSSplitViewController {
+            lines.append("split items collapsed: \(split.splitViewItems.map(\.isCollapsed)) widths: \(split.splitViewItems.map { Int($0.viewController.view.frame.width) })")
+        }
         for item in window.toolbar?.items ?? [] {
             var line = "toolbar: \(item.itemIdentifier.rawValue) label=\(item.label) visible=\(item.isVisible)"
             if let group = item as? NSToolbarItemGroup { line += " selected=\(group.selectedIndex)" }
@@ -135,7 +210,8 @@ enum DebugHooks {
                         if row == 0 {
                             lines.append("  [cell frame=\(cell?.frame ?? .zero) text=\(cell?.textField?.frame ?? .zero) col=\(outline.tableColumns.first?.width ?? -1) appearance=\(outline.effectiveAppearance.name.rawValue)]")
                         }
-                        lines.append("  \(String(repeating: "  ", count: outline.level(forRow: row)))\(cell?.textField?.stringValue ?? node.name)\(outline.selectedRow == row ? "  ← 选中" : "")")
+                        let date = (cell?.subviews ?? []).compactMap { $0 as? NSTextField }.filter { $0 !== cell?.textField }.map(\.stringValue).joined()
+                        lines.append("  \(String(repeating: "  ", count: outline.level(forRow: row)))\(cell?.textField?.stringValue ?? node.name)\(date.isEmpty ? "" : "  ·  \(date)")\(outline.selectedRow == row ? "  ← 选中" : "")")
                     }
                 }
             }
@@ -154,7 +230,8 @@ enum DebugHooks {
                 lines.append("banner: hidden=\(banner.isHidden) \(texts.joined(separator: " "))")
             }
             if let web = view as? WKWebView {
-                lines.append("preview: hidden=\(web.isHiddenOrHasHiddenAncestor) width=\(Int(web.frame.width)) obscuredTop=\(web.obscuredContentInsets.top)")
+                let under = web.underPageBackgroundColor.usingColorSpace(.sRGB).map { String(format: "%.2f", $0.brightnessComponent) } ?? "?"
+                lines.append("preview: hidden=\(web.isHiddenOrHasHiddenAncestor) width=\(Int(web.frame.width)) obscuredTop=\(web.obscuredContentInsets.top) underPageBrightness=\(under) appearance=\(web.effectiveAppearance.name.rawValue)")
             }
             for sub in view.subviews { walk(sub, depth: depth + 1) }
         }

@@ -123,8 +123,10 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         if let storage = textView.textStorage { highlighter.highlightAll(storage) }
     }
 
+    // 必须在 willProcessEditing 里着色：这一步改的属性会并进这次编辑交给排版器的失效范围。
+    // 放在 didProcessEditing 里改，排版器收不到新打的字的失效通知，字在却显示不出来（从空文档开始打字时整行空白）。
     func textStorage(
-        _ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
+        _ textStorage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions,
         range editedRange: NSRange, changeInLength delta: Int
     ) {
         guard editedMask.contains(.editedCharacters) else { return }
