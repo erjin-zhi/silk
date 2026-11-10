@@ -11,6 +11,11 @@
 - **三种模式**：阅读、对照、源码。普通文件初始使用阅读模式，之后记住手动选择的模式。
 - **对照编辑**：源码和预览双向滚动对齐；点击预览跳到源码，光标所在块在预览中高亮。
 - **文件夹浏览**：侧栏展示 Markdown 文件及修改时间，快速打开支持按文件路径模糊查找。
+- **文件夹全文搜索**：`⇧⌘F` 在整个文件夹的 Markdown 里搜索文字（不分大小写），列出每处命中所在的行；打开结果会滚到那一行并闪烁提示，对照和源码模式下同时选中命中的文字，之后在源码里按 `⌘G` 可以继续查找。
+- **导出 PDF / HTML**：「文件 → 导出」把渲染好的文档存成分页 PDF，或单个独立的 HTML 文件（样式、公式字体、本地图片都嵌在文件里）。导出和打印一律使用浅色主题，折叠内容展开，图表全部画好。
+- **与磁盘原文比较**：「文件 → 与磁盘版本比较…」按行列出编辑器内容与磁盘文件的差异；外部修改引起冲突时，提示条上也有「比较…」。看完可以直接选择存储自己的修改或载入磁盘版本。
+- **Quick Look**：在 Finder 里选中 Markdown 文件按空格，用和阅读模式相同的渲染预览。
+- **设为默认打开方式**：「Silk → 设为默认 Markdown 打开方式」一步把 `.md` 等扩展名交给 Silk 打开。
 - **实时刷新**：跟随外部文件修改，尽量保留阅读位置；在文末阅读时，新增内容会继续滚动跟随。
 - **草稿与恢复**：无需先选保存位置即可写作，退出后恢复文件夹、所选文件和未存走的草稿。
 - **原生操作**：支持深浅色外观、最近使用的文档、源码查找与替换、打印和缩放。
@@ -47,6 +52,8 @@
 | 阅读 / 对照 / 源码 | `⌘1` / `⌘2` / `⌘3` |
 | 显示或隐藏侧栏 | `⌃⌘S` |
 | 源码查找 / 查找并替换 | `⌘F` / `⌥⌘F` |
+| 在文件夹中搜索 | `⇧⌘F` |
+| 导出 PDF | `⇧⌘E` |
 | 在 Finder 中显示 | `⌥⌘R` |
 | 打印 | `⌘P` |
 | 放大 / 缩小 / 实际大小 | `⌘+` / `⌘-` / `⌘0` |
@@ -85,7 +92,7 @@ swift test --scratch-path .build.nosync
 npm --prefix web test
 ```
 
-原生测试覆盖编码、保存与冲突、软链接、文件树、双链、草稿与启动恢复，以及编辑器排版和外观。预览测试覆盖增量解析与整篇解析的一致性、标题锚点和换行行为。首次运行前端测试前，先执行 `npm --prefix web ci`。
+原生测试覆盖编码、保存与冲突、软链接、文件树、双链、草稿与启动恢复、文件夹搜索、差异对照、HTML 导出，以及编辑器排版和外观。预览测试覆盖增量解析与整篇解析的一致性、标题锚点和换行行为。首次运行前端测试前，先执行 `npm --prefix web ci`。
 
 ### 调试
 
@@ -102,6 +109,18 @@ swift scripts/debug.swift action=dump path=/tmp/silk-state.txt
 swift scripts/debug.swift action=snapshot path=/tmp/silk-window.png
 ```
 
+调试接口还支持 `action=search query=…`（可加 `pick=N` 直接打开第 N 处结果）、`action=export format=pdf|html path=…`、`action=compare`，以及用 `action=windowSnapshot which=sheet|panel path=…` 截取表单和浮动面板。
+
+Quick Look 扩展随应用一起打包在 `Contents/PlugIns/`。在构建目录里调试时，需要先登记扩展；若同时装了其他提供 Markdown 预览的 App（如 MarkEdit），系统可能优先用它们的扩展，可在「系统设置 → 通用 → 登录项与扩展 → Quick Look」里调整：
+
+```bash
+pluginkit -a build.nosync/Silk.app/Contents/PlugIns/SilkQuickLook.appex
+qlmanage -r
+qlmanage -p fixtures/showcase.md
+```
+
+扩展运行在沙盒里，读不到外面应用包里的文件，所以打包脚本会把预览资源复制一份到扩展里（不含体积较大的 Mermaid；读不到时图表显示为源码）。文档旁边的本地图片在 Quick Look 中也可能因沙盒限制而不显示。
+
 `SILK_PROFILE` 将窗口恢复记录和草稿放到独立位置，视图模式与缩放等设置仍使用常规偏好。调试截图无需录屏权限，更多操作见 [DebugHooks.swift](Sources/Silk/DebugHooks.swift)。
 
 ### 技术结构
@@ -113,9 +132,11 @@ swift scripts/debug.swift action=snapshot path=/tmp/silk-window.png
 | Markdown 预览 | 常驻 WKWebView、markdown-it，按块增量更新 DOM |
 | 公式与图表 | 内置 KaTeX；Mermaid 脚本按需加载 |
 | 文件监听 | FSEvents |
+| 导出与打印 | 预览页交出整篇 HTML，原生端内联样式、字体和图片；PDF 由不显示的 WKWebView 按纸张分页 |
+| Quick Look | 沙盒 App 扩展（`Sources/SilkQuickLook/`），加载同一套预览页 |
 | 应用图标 | Icon Composer 分层图标，见 [品牌资源说明](Resources/Brand/README.md) |
 
-主要目录：`Sources/Silk/` 为原生应用，`web/src/` 为预览源码，`Resources/` 为打包资源，`Tests/SilkTests/` 和 `web/test/` 为测试，`scripts/` 为构建及调试脚本。
+主要目录：`Sources/Silk/` 为原生应用，`Sources/SilkQuickLook/` 为 Quick Look 扩展，`web/src/` 为预览源码，`Resources/` 为打包资源，`Tests/SilkTests/` 和 `web/test/` 为测试，`scripts/` 为构建及调试脚本。
 
 ## 性能
 
@@ -134,10 +155,8 @@ swift scripts/debug.swift action=snapshot path=/tmp/silk-window.png
 
 ## 后续计划
 
-- Quick Look 插件。
-- 文件夹全文搜索。
-- 专用 PDF / HTML 导出。
-- 与磁盘原文的差异对照。
+- 文件夹搜索支持正则和替换。
+- 导出时可选深色主题和纸张样式。
 
 ## 项目记录
 

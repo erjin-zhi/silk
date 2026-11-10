@@ -13,6 +13,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private var initialFile: URL?
     private var scanned = false
     private lazy var quickOpenPanel = QuickOpenPanel()
+    private(set) lazy var searchPanel = FolderSearchPanel()
 
     var onClose: (() -> Void)?
     /// 窗口里打开的文件变了，App 记下来，下次启动恢复。
@@ -94,6 +95,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         docView.onDirtyChange = { [weak self] dirty in self?.window?.isDocumentEdited = dirty }
         docView.onModeChange = { [weak self] mode in self?.updateModeControl(mode) }
         docView.onOpenLink = { [weak self] url, wiki in self?.openLink(url, wiki: wiki) }
+        docView.onCompare = { [weak self] in self?.compareWithDisk(nil) }
 
         workspace.onTreeChange = { [weak self] in self?.treeDidChange() }
         workspace.onFilesChange = { [weak self] paths in
@@ -121,7 +123,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     // MARK: - 文件
 
-    func openFile(_ url: URL, fragment: String? = nil) {
+    /// then：真的打开了之后再做的事（比如跳到搜索结果那一行）。
+    func openFile(_ url: URL, fragment: String? = nil, then: (() -> Void)? = nil) {
         docView.open(url, fragment: fragment) { [weak self] opened in
             guard let self else { return }
             // 没切过去（当前文档的修改存不下来、用户取消了）：侧栏选中项退回当前文件。
@@ -134,6 +137,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             if !self.isDraft { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
             self.quickOpenPanel.noteOpened(url)
             self.onStateChange?()
+            then?()
         }
     }
 
@@ -282,7 +286,99 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         NSWorkspace.shared.activateFileViewerSelecting([docView.fileURL ?? workspace.root])
     }
 
-    @objc func printDocument(_ sender: Any?) { docView.printPreview() }
+    @objc func printDocument(_ sender: Any?) {
+        docView.printDocument { [weak self] result in
+            if case .failure(let error) = result { self?.showError(error) }
+        }
+    }
+
+    // MARK: - 导出
+
+    @objc func exportHTML(_ sender: Any?) {
+        chooseExportLocation("html") { [weak self] url in
+            self?.docView.exportHTML { result in
+                do {
+                    try Data(result.get().utf8).write(to: url, options: .atomic)
+                } catch {
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    @objc func exportPDF(_ sender: Any?) {
+        chooseExportLocation("pdf") { [weak self] url in
+            self?.docView.printDocument(toPDF: url) { result in
+                switch result {
+                case .success(true): break
+                case .success(false): self?.showError(CocoaError(.fileWriteUnknown))
+                case .failure(let error): self?.showError(error)
+                }
+            }
+        }
+    }
+
+    /// 选导出到哪儿。默认弹存储面板；测试里换成直接给位置。
+    lazy var chooseExportLocation: (String, @escaping (URL) -> Void) -> Void = { [weak self] ext, done in
+        self?.showExportPanel(extension: ext, done)
+    }
+
+    private func showExportPanel(extension ext: String, _ done: @escaping (URL) -> Void) {
+        guard let window else { return }
+        let panel = NSSavePanel()
+        let base = isDraft ? DraftStore.suggestedName(for: docView.text) : (docView.fileURL?.lastPathComponent ?? "未命名")
+        panel.nameFieldStringValue = (base as NSString).deletingPathExtension + "." + ext
+        panel.allowedContentTypes = [.init(filenameExtension: ext)!]
+        panel.canCreateDirectories = true
+        panel.directoryURL = isDraft
+            ? (saveDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+            : docView.fileURL?.deletingLastPathComponent()
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            done(url)
+        }
+    }
+
+    private func showError(_ error: any Error) {
+        guard let window else { return }
+        NSAlert(error: error).beginSheetModal(for: window)
+    }
+
+    // MARK: - 与磁盘版本比较
+
+    @objc func compareWithDisk(_ sender: Any?) {
+        guard !isDraft, let url = docView.fileURL, let window, window.attachedSheet == nil else { return }
+        let sheet = DiffSheet(fileName: url.lastPathComponent, disk: docView.diskText(), mine: docView.text) { [weak self] choice in
+            switch choice {
+            case .keepMine: self?.docView.keepMyChanges()
+            case .loadDisk: self?.docView.loadDiskVersion()
+            case .close: break
+            }
+        }
+        window.contentViewController?.presentAsSheet(sheet)
+    }
+
+    // MARK: - 在文件夹中搜索
+
+    @objc func findInFolder(_ sender: Any?) {
+        guard !isDraft, let window else { return }
+        // 编辑器里选了一小段（一行以内）就直接搜它。
+        let selected = docView.selectedText
+        let query = selected.count <= 200 && !selected.contains("\n") ? selected : nil
+        searchPanel.show(over: window, workspace: workspace, query: query) { [weak self] match, query in
+            self?.openSearchResult(match, query: query)
+        }
+    }
+
+    func openSearchResult(_ match: FolderSearch.Match, query: String) {
+        // 搜的词放进查找粘贴板，回到源码里按 ⌘G 就能接着找下一个。
+        let find = NSPasteboard(name: .find)
+        find.clearContents()
+        find.setString(query, forType: .string)
+        openFile(match.url) { [weak self] in
+            self?.docView.reveal(line: match.line, range: match.range)
+        }
+    }
 
     @objc func showReadMode(_ sender: Any?) { docView.setMode(.read) }
     @objc func showSplitMode(_ sender: Any?) { docView.setMode(.split) }
@@ -317,7 +413,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             menuItem.title = isDraft ? "存储…" : "存储"
             return isDraft || docView.isDirty
         case #selector(revealInFinder(_:)): return !isDraft
-        case #selector(printDocument(_:)): return docView.fileURL != nil
+        case #selector(printDocument(_:)), #selector(exportHTML(_:)), #selector(exportPDF(_:)): return docView.fileURL != nil
+        case #selector(compareWithDisk(_:)): return !isDraft && docView.fileURL != nil
+        case #selector(findInFolder(_:)): return !isDraft
         default: break
         }
         return true

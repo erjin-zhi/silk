@@ -32,6 +32,8 @@ enum MainMenu {
         let menu = NSMenu(title: "Silk")
         menu.addItem(item("关于 Silk", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
         menu.addItem(.separator())
+        menu.addItem(item("设为默认 Markdown 打开方式", #selector(AppDelegate.makeDefaultMarkdownApp(_:))))
+        menu.addItem(.separator())
         let services = NSMenuItem(title: "服务", action: nil, keyEquivalent: "")
         services.submenu = NSMenu(title: "服务")
         NSApp.servicesMenu = services.submenu
@@ -60,10 +62,17 @@ enum MainMenu {
         menu.addItem(item("快速打开…", #selector(WorkspaceWindowController.quickOpen(_:)), "o", [.command, .shift]))
         menu.addItem(.separator())
         menu.addItem(item("存储", #selector(WorkspaceWindowController.saveDocument(_:)), "s"))
+        menu.addItem(item("与磁盘版本比较…", #selector(WorkspaceWindowController.compareWithDisk(_:))))
         menu.addItem(item("在 Finder 中显示", #selector(WorkspaceWindowController.revealInFinder(_:)), "r", [.command, .option]))
         menu.addItem(.separator())
         menu.addItem(item("关闭窗口", #selector(NSWindow.performClose(_:)), "w"))
         menu.addItem(.separator())
+        let export = NSMenu(title: "导出")
+        export.addItem(item("PDF…", #selector(WorkspaceWindowController.exportPDF(_:)), "e", [.command, .shift]))
+        export.addItem(item("HTML…", #selector(WorkspaceWindowController.exportHTML(_:))))
+        let exportItem = NSMenuItem(title: "导出", action: nil, keyEquivalent: "")
+        exportItem.submenu = export
+        menu.addItem(exportItem)
         menu.addItem(item("打印…", #selector(WorkspaceWindowController.printDocument(_:)), "p"))
         return menu
     }
@@ -87,6 +96,8 @@ enum MainMenu {
         find.addItem(item("查找下一个", action, "g", tag: NSTextFinder.Action.nextMatch.rawValue))
         find.addItem(item("查找上一个", action, "g", [.command, .shift], tag: NSTextFinder.Action.previousMatch.rawValue))
         find.addItem(item("用所选内容查找", action, "e", tag: NSTextFinder.Action.setSearchString.rawValue))
+        find.addItem(.separator())
+        find.addItem(item("在文件夹中搜索…", #selector(WorkspaceWindowController.findInFolder(_:)), "f", [.command, .shift]))
         let findItem = NSMenuItem(title: "查找", action: nil, keyEquivalent: "")
         findItem.submenu = find
         menu.addItem(findItem)

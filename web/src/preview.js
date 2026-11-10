@@ -492,27 +492,111 @@ function scrollToLine(line) {
 
 let highlighted = null;
 
-function highlightLine(line) {
+/** 某行对应的元素：所在块，或块里更细的表格行、列表项。落在两个块之间的空行上时为 null。 */
+function elementForLine(line) {
   const k = blockIndexForLine(line);
   const blk = current[k];
-  let target = null;
-  // 光标落在两个块之间的空行上，不高亮。
-  if (blk && line >= blk._l && line < blk._e) {
-    target = blk;
-    let best = 0;
-    const rel = line - blk._l;
-    for (const sub of blk.querySelectorAll('[data-r]')) {
-      const r = Number(sub.dataset.r);
-      if (r > 0 && r <= rel && r >= best && sub.offsetParent !== null) {
-        best = r;
-        target = sub;
-      }
+  if (!blk || line < blk._l || line >= blk._e) return null;
+  let target = blk;
+  let best = 0;
+  const rel = line - blk._l;
+  for (const sub of blk.querySelectorAll('[data-r]')) {
+    const r = Number(sub.dataset.r);
+    if (r > 0 && r <= rel && r >= best && sub.offsetParent !== null) {
+      best = r;
+      target = sub;
     }
   }
+  return target;
+}
+
+function highlightLine(line) {
+  const target = elementForLine(line);
   if (highlighted === target) return;
   highlighted?.classList.remove('cursor-block');
   target?.classList.add('cursor-block');
   highlighted = target;
+}
+
+// ---------- 搜索结果：滚到那一行并闪一下 ----------
+
+function reveal(line) {
+  suppressScrollUntil = performance.now() + 150;
+  // 命中的那一行放在视口上方四分之一处，上面留点上下文。
+  const go = () => window.scrollTo(0, Math.max(0, lineToY(line) - window.innerHeight / 4));
+  go();
+  if (virtual) {
+    updateVirtual();
+    go();
+    updateVirtual();
+  }
+  const target = elementForLine(line) ?? current[blockIndexForLine(line)];
+  if (!target) return;
+  target.classList.remove('search-flash');
+  void target.offsetWidth; // 重新开始动画
+  target.classList.add('search-flash');
+  setTimeout(() => target.classList.remove('search-flash'), 1700);
+}
+
+// ---------- 导出：完整的 HTML 正文 ----------
+
+/** 把整篇渲染好（大文档的占位块、还没画的图表都补上），返回干净的正文 HTML。图表一律用浅色主题。 */
+async function exportHTML() {
+  materializeAll();
+  const clone = root.cloneNode(true);
+  clone.className = 'markdown-body';
+
+  // 图表：克隆出来的节点没有 _src，按顺序和原来的对上。
+  const sources = [...root.querySelectorAll('.mermaid-block')].map((b) => b._src ?? b.textContent);
+  const blocks = [...clone.querySelectorAll('.mermaid-block')];
+  if (blocks.length) {
+    let mermaid = null;
+    try {
+      mermaid = await loadMermaid();
+    } catch {}
+    if (mermaid) {
+      const job = async () => {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif' });
+        try {
+          for (let i = 0; i < blocks.length; i++) {
+            const id = `mmd-x${++mermaidSeq}`;
+            try {
+              const { svg } = await mermaid.render(id, sources[i]);
+              blocks[i].innerHTML = svg;
+              blocks[i].classList.remove('error');
+            } catch (error) {
+              document.getElementById('d' + id)?.remove();
+              blocks[i].classList.add('error');
+              blocks[i].innerHTML = '<pre class="mermaid-src"></pre>';
+              blocks[i].firstChild.textContent = sources[i];
+            }
+          }
+        } finally {
+          initMermaid(mermaid);
+        }
+      };
+      const run = mermaidQueue.then(job);
+      mermaidQueue = run.catch(() => {});
+      await run;
+    }
+  }
+
+  for (const el of clone.querySelectorAll('.copy-btn')) el.remove();
+  // 折叠的内容展开：导出的 PDF 里点不开。
+  for (const el of clone.querySelectorAll('details')) el.open = true;
+  for (const el of clone.querySelectorAll('.cursor-block, .search-flash')) el.classList.remove('cursor-block', 'search-flash');
+  for (const el of clone.querySelectorAll('[data-l]')) el.removeAttribute('data-l');
+  for (const el of clone.querySelectorAll('[style]')) if (el.classList.contains('blk')) el.removeAttribute('style');
+  // 本地图片换成绝对地址（silk-file:///…），原生端再把它嵌进文件里。
+  for (const img of clone.querySelectorAll('img[src]')) img.setAttribute('src', img.src);
+  for (const el of clone.querySelectorAll('video[src], source[src]')) el.setAttribute('src', el.src);
+
+  const h1 = clone.querySelector('h1');
+  return {
+    html: clone.innerHTML,
+    title: h1 ? h1.textContent.trim() : '',
+    math: !!clone.querySelector('.katex'),
+  };
 }
 
 // ---------- 点击：链接、复制、点块跳到源码 ----------
@@ -581,6 +665,8 @@ window.silk = {
   materializeAll,
   timings,
   highlightLine,
+  reveal,
+  exportHTML,
   topLine() {
     return yToLine(window.scrollY);
   },

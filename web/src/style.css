@@ -311,6 +311,13 @@ body[data-mode="split"] .blk { cursor: text; }
   .hljs-deletion { color: #ffdcd7; background: #67060c; }
 }
 
+/* 搜索结果：跳过去时闪一下 */
+.search-flash { border-radius: 4px; animation: silk-flash 1.6s ease-out; }
+@keyframes silk-flash {
+  from { background: color-mix(in srgb, -apple-system-yellow 50%, transparent); }
+  to { background: transparent; }
+}
+
 @media print {
   .markdown-body { max-width: none; padding: 0; }
   .copy-btn { display: none; }

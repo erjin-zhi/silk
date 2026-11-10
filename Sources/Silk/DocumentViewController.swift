@@ -91,6 +91,7 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         preview.setZoom(zoom)
         banner.onPrimary = { [weak self] in self?.bannerPrimary() }
         banner.onSecondary = { [weak self] in self?.bannerSecondary() }
+        banner.onTertiary = { [weak self] in self?.onCompare?() }
 
         applyMode(animated: false)
     }
@@ -300,7 +301,7 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
     private func showConflict(_ conflict: DocumentSession.Conflict) {
         switch conflict {
         case .modified:
-            banner.show(message: "文件在磁盘上被修改了，你的修改还没存", primary: "保留我的修改", secondary: "载入磁盘版本")
+            banner.show(message: "文件在磁盘上被修改了，你的修改还没存", primary: "保留我的修改", secondary: "载入磁盘版本", tertiary: "比较…")
         case .deleted:
             banner.show(message: "文件在磁盘上被删除或移走了", primary: "重新存储", secondary: nil)
         }
@@ -384,21 +385,89 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         editor.setFontSize(13 * zoom)
     }
 
-    // MARK: - 打印
+    // MARK: - 打印与导出
 
-    func printPreview() {
-        guard let window = view.window else { return }
-        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
-        info.topMargin = 36
-        info.bottomMargin = 36
-        info.leftMargin = 36
-        info.rightMargin = 36
-        preview.prepareForPrint { [weak self] in
-            guard let self else { return }
-            let operation = self.preview.webView.printOperation(with: info)
-            operation.view?.frame = self.preview.webView.bounds
-            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    /// 正在打印 / 导出 PDF 时用的排版器，完成前要留着。
+    private var printRenderer: PrintRenderer?
+
+    /// 文档标题：正文没有一级标题时用文件名。
+    private var exportFallbackTitle: String {
+        fileURL.map { $0.deletingPathExtension().lastPathComponent } ?? "未命名"
+    }
+
+    /// 生成完整的导出 HTML。
+    func exportHTML(_ completion: @escaping (Result<String, any Error>) -> Void) {
+        let fallback = exportFallbackTitle
+        preview.exportBody { result in
+            completion(result.map { HTMLExport.document($0, fallbackTitle: fallback) })
         }
+    }
+
+    /// 打印（pdf 为 nil）或直接存成 PDF。completion 收到是否成功（用户在打印面板里取消也算没成功）。
+    func printDocument(toPDF pdf: URL? = nil, completion: ((Result<Bool, any Error>) -> Void)? = nil) {
+        guard let window = view.window, printRenderer == nil else { return }
+        exportHTML { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                completion?(.failure(error))
+            case .success(let html):
+                let renderer = PrintRenderer()
+                self.printRenderer = renderer
+                Task { @MainActor [weak self] in
+                    do {
+                        try await renderer.load(html)
+                    } catch {
+                        self?.printRenderer = nil
+                        completion?(.failure(error))
+                        return
+                    }
+                    renderer.run(for: window, pdf: pdf) { [weak self] ok in
+                        self?.printRenderer = nil
+                        completion?(.success(ok))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 与磁盘版本比较
+
+    /// 磁盘上现在的内容；读不到（被删了、没权限）时为 nil。
+    func diskText() -> String? {
+        guard let url = fileURL else { return nil }
+        return try? TextFile.read(url).text
+    }
+
+    /// 用户看过差异后选了「存储我的修改」：用编辑器里的内容覆盖磁盘。
+    func keepMyChanges() {
+        guard let session else { return }
+        handle(session.overwrite(with: editor.string))
+    }
+
+    /// 用户看过差异后选了「载入磁盘版本」。
+    func loadDiskVersion() {
+        guard let session else { return }
+        guard let text = session.takeDiskVersion() else { return NSSound.beep() }
+        editor.replaceKeepingPosition(with: text)
+        isDirty = false
+        hideBanner()
+        preview.update(text)
+    }
+
+    /// 横幅上点了「比较」。
+    var onCompare: (() -> Void)?
+
+    // MARK: - 搜索结果
+
+    /// 跳到搜索结果：预览滚过去闪一下；能编辑的模式下源码里选中命中的文字。
+    func reveal(line: Int, range: NSRange) {
+        if mode != .read {
+            editor.select(range)
+            view.window?.makeFirstResponder(editor.textView)
+        }
+        previewTopLine = Double(line)
+        preview.reveal(line: line)
     }
 
     // MARK: - 对照
@@ -424,6 +493,12 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
 
     /// 编辑器里现在的全文。
     var text: String { editor.string }
+
+    /// 编辑器里选中的文字（阅读模式下没有）。
+    var selectedText: String {
+        guard mode != .read else { return "" }
+        return (editor.string as NSString).substring(with: editor.textView.selectedRange())
+    }
 
     /// 光标放进编辑器，可以直接打字。
     func focusEditor() {
@@ -458,10 +533,12 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
 final class ChangeBanner: NSView {
     var onPrimary: (() -> Void)?
     var onSecondary: (() -> Void)?
+    var onTertiary: (() -> Void)?
 
     private let label = NSTextField(labelWithString: "")
     private let primary = NSButton(title: "", target: nil, action: nil)
     private let secondary = NSButton(title: "", target: nil, action: nil)
+    private let tertiary = NSButton(title: "", target: nil, action: nil)
 
     init() {
         super.init(frame: .zero)
@@ -472,14 +549,14 @@ final class ChangeBanner: NSView {
         label.font = .systemFont(ofSize: 13, weight: .medium)
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for (button, action) in [(primary, #selector(primaryTapped)), (secondary, #selector(secondaryTapped))] {
+        for (button, action) in [(primary, #selector(primaryTapped)), (secondary, #selector(secondaryTapped)), (tertiary, #selector(tertiaryTapped))] {
             button.bezelStyle = .push
             button.controlSize = .small
             button.target = self
             button.action = action
         }
 
-        let stack = NSStackView(views: [label, secondary, primary])
+        let stack = NSStackView(views: [label, tertiary, secondary, primary])
         stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 16, bottom: 6, right: 8)
         glass.contentView = stack
@@ -496,14 +573,17 @@ final class ChangeBanner: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(message: String, primary primaryTitle: String, secondary secondaryTitle: String?) {
+    func show(message: String, primary primaryTitle: String, secondary secondaryTitle: String?, tertiary tertiaryTitle: String? = nil) {
         label.stringValue = message
         primary.title = primaryTitle
         secondary.title = secondaryTitle ?? ""
         secondary.isHidden = secondaryTitle == nil
+        tertiary.title = tertiaryTitle ?? ""
+        tertiary.isHidden = tertiaryTitle == nil
         isHidden = false
     }
 
     @objc private func primaryTapped() { onPrimary?() }
     @objc private func secondaryTapped() { onSecondary?() }
+    @objc private func tertiaryTapped() { onTertiary?() }
 }

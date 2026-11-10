@@ -41,6 +41,10 @@
 			<array>
 				<string>net.daringfireball.markdown</string>
 				<string>public.markdown</string>
+				<string>net.ia.markdown</string>
+				<string>io.typora.markdown</string>
+				<string>com.kingsoft.wpsoffice.markdown</string>
+				<string>app.cyan.markedit.markdown</string>
 			</array>
 			<key>CFBundleTypeExtensions</key>
 			<array>

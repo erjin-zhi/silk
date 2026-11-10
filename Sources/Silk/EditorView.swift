@@ -216,6 +216,18 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         }
     }
 
+    /// 选中一段文字（搜索结果），滚到视口上方三分之一处，并闪一下。
+    func select(_ range: NSRange) {
+        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        textView.setSelectedRange(range)
+        let rect = fragmentRect(at: range.location).offsetBy(dx: 0, dy: textView.textContainerInset.height)
+        let visible = contentView.bounds
+        programmaticScroll = true
+        textView.scrollToVisible(rect.insetBy(dx: 0, dy: -visible.height / 3))
+        programmaticScroll = false
+        if range.length > 0 { textView.showFindIndicator(for: range) }
+    }
+
     @objc private func boundsDidChange() {
         guard !programmaticScroll else { return }
         onScroll?(topLine)

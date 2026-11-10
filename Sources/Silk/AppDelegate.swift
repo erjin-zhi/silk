@@ -2,7 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var windows: [WorkspaceWindowController] = []
     private var openedAtLaunch = false
     /// 确定要退出了。退出时 AppKit 还会把窗口一个个关掉，这时不能再改记下的状态，不然下次就恢复成空的了。
@@ -234,6 +234,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.append(controller)
         controller.showWindow(nil)
         if controller.isDraft { controller.docView.focusEditor() }
+    }
+}
+
+// MARK: - 默认打开方式
+
+extension AppDelegate {
+    /// 把 Silk 设成 Markdown 文件的默认打开方式。系统会弹框请用户确认。
+    @objc func makeDefaultMarkdownApp(_ sender: Any?) {
+        let app = Bundle.main.bundleURL
+        let types = MarkdownFiles.defaultAppTypes
+        Task { @MainActor in
+            var failed: (any Error)?
+            for type in types {
+                do {
+                    try await NSWorkspace.shared.setDefaultApplication(at: app, toOpen: type)
+                } catch {
+                    failed = failed ?? error
+                }
+            }
+            let alert = NSAlert()
+            if MarkdownFiles.isDefaultApp(app) {
+                alert.messageText = "Silk 已是 Markdown 文件的默认打开方式"
+                alert.informativeText = "在 Finder 里双击 .md 文件会用 Silk 打开。想换回别的 App，可以在 Finder 的「显示简介」→「打开方式」里修改。"
+            } else {
+                alert.alertStyle = .warning
+                alert.messageText = "没能设为默认打开方式"
+                alert.informativeText = failed?.localizedDescription
+                    ?? "可以在 Finder 里选中一个 .md 文件，「显示简介」→「打开方式」选 Silk，再点「全部更改…」。"
+            }
+            alert.runModal()
+        }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(makeDefaultMarkdownApp(_:)) {
+            // swift run 直接跑可执行文件时没有 App 包，设不了。
+            guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return false }
+            menuItem.state = MarkdownFiles.isDefaultApp(Bundle.main.bundleURL) ? .on : .off
+        }
+        return true
     }
 }
 

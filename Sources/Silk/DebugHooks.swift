@@ -153,6 +153,38 @@ enum DebugHooks {
             NSApp.sendAction(action, to: item.target, from: item)
         case "terminate":
             NSApp.terminate(nil)
+        case "search":
+            // 在文件夹中搜索：{"action": "search", "query": "标题"}，加 "pick": "2" 直接打开第 2 处结果。
+            guard let controller, let window else { return }
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            controller.findInFolder(nil)
+            controller.searchPanel.setQuery(info["query"] ?? "")
+            if let pick = info["pick"].flatMap(Int.init) {
+                let files = controller.workspace.files.map(\.url)
+                let result = FolderSearch.search(info["query"] ?? "", in: files)
+                guard pick >= 1, pick <= result.matches.count else { return log("搜索：没有第 \(pick) 处结果") }
+                controller.searchPanel.close()
+                controller.openSearchResult(result.matches[pick - 1], query: info["query"] ?? "")
+            }
+        case "export":
+            // 导出到指定位置，不弹存储面板：{"action": "export", "format": "pdf", "path": "/tmp/a.pdf"}
+            guard let controller, let path = info["path"] else { return }
+            let url = URL(fileURLWithPath: path)
+            controller.chooseExportLocation = { _, done in done(url) }
+            if info["format"] == "pdf" { controller.exportPDF(nil) } else { controller.exportHTML(nil) }
+        case "compare":
+            controller?.compareWithDisk(nil)
+        case "windowSnapshot":
+            // 截表单或浮动面板（不含网页内容）：{"action": "windowSnapshot", "which": "sheet", "path": "/tmp/a.png"}
+            guard let path = info["path"] else { return }
+            let target = info["which"] == "sheet"
+                ? window?.attachedSheet
+                : NSApp.windows.first { $0 is NSPanel && $0.isVisible }
+            guard let view = target?.contentView?.superview ?? target?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return log("没有可截的窗口") }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         case "quickopenLayout":
             // 快速打开面板里各部件的位置，检查有没有重叠。
             guard let path = info["path"], let panel = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible }),

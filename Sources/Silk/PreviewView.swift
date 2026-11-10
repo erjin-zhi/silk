@@ -192,10 +192,28 @@ final class PreviewController: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// 打印前把大文档里还没填内容的块都填上。
-    func prepareForPrint(_ completion: @escaping () -> Void) {
-        guard ready else { return completion() }
-        call("silk.materializeAll()", [:], completion: completion)
+    /// 滚到某行（搜索结果），并让那一块闪一下。
+    func reveal(line: Int) {
+        guard ready else { return }
+        call("silk.reveal(line)", ["line": line])
+    }
+
+    /// 导出用的正文：整篇都渲染好，图表用浅色主题画好。
+    func exportBody(_ completion: @escaping (Result<HTMLExport.Body, any Error>) -> Void) {
+        guard ready else { return completion(.failure(CocoaError(.featureUnsupported))) }
+        webView.callAsyncJavaScript("return await silk.exportHTML()", arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let value):
+                guard let dict = value as? [String: Any], let html = dict["html"] as? String else {
+                    return completion(.failure(CocoaError(.coderReadCorrupt)))
+                }
+                completion(.success(HTMLExport.Body(
+                    html: html, title: dict["title"] as? String ?? "", math: dict["math"] as? Bool ?? false
+                )))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
     }
 
     func setZoom(_ zoom: CGFloat) {

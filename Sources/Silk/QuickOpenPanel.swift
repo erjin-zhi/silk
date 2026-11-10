@@ -225,7 +225,7 @@ final class QuickOpenPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate
     func windowDidResignKey(_ notification: Notification) { close() }
 }
 
-private final class KeyablePanel: NSPanel {
+final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 

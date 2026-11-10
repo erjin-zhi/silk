@@ -50,6 +50,25 @@ enum MarkdownFiles {
         return paths.contains(String(cString: real))
     }
 
+    /// 设默认打开方式时要改的类型。各扩展名对应的类型取决于装了哪些 App
+    /// （比如 .mdx 可能被别的编辑器声明成自己的类型），所以按扩展名逐个查，再加上标准的 Markdown 类型。
+    static var defaultAppTypes: [UTType] {
+        var types: [UTType] = []
+        let standard = [UTType("net.daringfireball.markdown"), UTType("public.markdown")].compactMap { $0 }
+        for type in standard + extensions.sorted().compactMap({ UTType(filenameExtension: $0) })
+        where !type.isDynamic && !types.contains(type) {
+            types.append(type)
+        }
+        return types
+    }
+
+    /// .md 文件现在是不是用这个 App 打开。
+    static func isDefaultApp(_ app: URL) -> Bool {
+        guard let md = UTType(filenameExtension: "md"),
+              let current = NSWorkspace.shared.urlForApplication(toOpen: md) else { return false }
+        return current.standardizedFileURL.resolvingSymlinksInPath() == app.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
     static func isMarkdown(_ url: URL) -> Bool {
         extensions.contains(url.pathExtension.lowercased())
     }
