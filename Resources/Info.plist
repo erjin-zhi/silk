@@ -26,6 +26,14 @@
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/erjin-zhi/silk/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>SVlZdu3JizDsTWgpzPXIRB0L+0RqMiNwhXhZT1mbPSU=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 	<key>NSHumanReadableCopyright</key>
 	<string>Markdown, smooth as silk.</string>
 	<key>CFBundleDocumentTypes</key>

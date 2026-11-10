@@ -175,12 +175,22 @@ enum DebugHooks {
             if info["format"] == "pdf" { controller.exportPDF(nil) } else { controller.exportHTML(nil) }
         case "compare":
             controller?.compareWithDisk(nil)
+        case "about":
+            AboutWindowController.shared.show()
+        case "checkForUpdates":
+            // {"action": "checkForUpdates", "background": "1", "autoDownload": "1"}
+            if let auto = info["autoDownload"] { Updater.shared.automaticallyDownloads = auto == "1" }
+            if info["background"] == "1" { Updater.shared.checkInBackground() } else { Updater.shared.checkForUpdates() }
         case "windowSnapshot":
             // 截表单或浮动面板（不含网页内容）：{"action": "windowSnapshot", "which": "sheet", "path": "/tmp/a.png"}
             guard let path = info["path"] else { return }
-            let target = info["which"] == "sheet"
-                ? window?.attachedSheet
-                : NSApp.windows.first { $0 is NSPanel && $0.isVisible }
+            let target = switch info["which"] {
+            case "sheet": window?.attachedSheet
+            case "about": AboutWindowController.shared.window
+            // 最前面的非工作区窗口，比如 Sparkle 的更新窗口。
+            case "front": NSApp.orderedWindows.first { $0.isVisible && !($0.windowController is WorkspaceWindowController) }
+            default: NSApp.windows.first { $0 is NSPanel && $0.isVisible }
+            }
             guard let view = target?.contentView?.superview ?? target?.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return log("没有可截的窗口") }
             view.cacheDisplay(in: view.bounds, to: rep)

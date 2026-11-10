@@ -30,7 +30,8 @@ enum MainMenu {
 
     private static func appMenu() -> NSMenu {
         let menu = NSMenu(title: "Silk")
-        menu.addItem(item("关于 Silk", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        menu.addItem(item("关于 Silk", #selector(AppDelegate.showAbout(_:))))
+        menu.addItem(item("检查更新…", #selector(AppDelegate.checkForUpdates(_:))))
         menu.addItem(.separator())
         menu.addItem(item("设为默认 Markdown 打开方式", #selector(AppDelegate.makeDefaultMarkdownApp(_:))))
         menu.addItem(.separator())

@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DebugHooks.installIfNeeded()
+        Updater.shared.start()
         DebugHooks.log("启动完成")
         // 从 Finder 双击打开时，application(_:open:) 会先于这里被调用，就只打开那个文件。
         guard !openedAtLaunch, windows.isEmpty else { return }
@@ -237,6 +238,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 }
 
+// MARK: - 关于与更新
+
+extension AppDelegate {
+    @objc func showAbout(_ sender: Any?) {
+        AboutWindowController.shared.show()
+    }
+
+    @objc func checkForUpdates(_ sender: Any?) {
+        Updater.shared.checkForUpdates()
+    }
+}
+
 // MARK: - 默认打开方式
 
 extension AppDelegate {
@@ -268,6 +281,9 @@ extension AppDelegate {
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates(_:)) {
+            return Updater.shared.canCheckForUpdates
+        }
         if menuItem.action == #selector(makeDefaultMarkdownApp(_:)) {
             // swift run 直接跑可执行文件时没有 App 包，设不了。
             guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return false }

@@ -15,6 +15,7 @@
 - **导出 PDF / HTML**：「文件 → 导出」把渲染好的文档存成分页 PDF，或单个独立的 HTML 文件（样式、公式字体、本地图片都嵌在文件里）。导出和打印一律使用浅色主题，折叠内容展开，图表全部画好。
 - **与磁盘原文比较**：「文件 → 与磁盘版本比较…」按行列出编辑器内容与磁盘文件的差异；外部修改引起冲突时，提示条上也有「比较…」。看完可以直接选择存储自己的修改或载入磁盘版本。
 - **Quick Look**：在 Finder 里选中 Markdown 文件按空格，用和阅读模式相同的渲染预览。
+- **自动更新**：基于 Sparkle，默认每天在后台检查一次；「Silk → 检查更新…」随时手动检查。「关于 Silk」窗口里显示版本号和上次检查时间，可以关闭自动检查，或选择自动下载并在退出时安装。
 - **设为默认打开方式**：「Silk → 设为默认 Markdown 打开方式」一步把 `.md` 等扩展名交给 Silk 打开。
 - **实时刷新**：跟随外部文件修改，尽量保留阅读位置；在文末阅读时，新增内容会继续滚动跟随。
 - **草稿与恢复**：无需先选保存位置即可写作，退出后恢复文件夹、所选文件和未存走的草稿。
@@ -85,6 +86,24 @@ scripts/build-app.sh
 
 打包脚本使用本地 ad-hoc 签名，构建号取 Git 提交数。用 Xcode 打开 `Package.swift` 可以调试原生代码。
 
+### 发布与自动更新
+
+自动更新使用 [Sparkle](https://sparkle-project.org)（Swift Package，打包时放进 `Contents/Frameworks/`）。`Resources/Info.plist` 里的 `SUFeedURL` 指向 GitHub Release 最新版附带的 `appcast.xml`，`SUPublicEDKey` 是更新包验签用的公钥；对应的私钥保存在发版电脑的登录钥匙串里。
+
+发版步骤：
+
+1. 修改 `Resources/Info.plist` 的 `CFBundleShortVersionString` 并提交。构建号取提交数，须比上一版大。
+2. 可选：在 `build.nosync/release/` 放一份 `Silk-<版本>.md`，作为更新窗口里的更新说明。
+3. 运行 `scripts/release.sh` 生成签名后的 zip 和 `appcast.xml`；确认无误后运行 `scripts/release.sh --publish`，用 `gh` 创建 `v<版本>` Release 并上传两个文件。
+
+`build.nosync/release/` 保存历次的 zip 和 appcast，`generate_appcast` 每次只追加新版本，不要删除。换电脑发版前，先导出私钥备份：
+
+```bash
+.build.nosync/artifacts/sparkle/Sparkle/bin/generate_keys -x silk-sparkle-private-key
+```
+
+私钥丢失后，已安装的 Silk 无法再验证新版本，也就收不到更新。应用目前只用 ad-hoc 签名，Sparkle 靠 EdDSA 签名确认更新包来源；首次从网上下载安装时仍需在 Finder 里右键打开。
+
 ### 测试
 
 ```bash
@@ -109,7 +128,7 @@ swift scripts/debug.swift action=dump path=/tmp/silk-state.txt
 swift scripts/debug.swift action=snapshot path=/tmp/silk-window.png
 ```
 
-调试接口还支持 `action=search query=…`（可加 `pick=N` 直接打开第 N 处结果）、`action=export format=pdf|html path=…`、`action=compare`，以及用 `action=windowSnapshot which=sheet|panel path=…` 截取表单和浮动面板。
+调试接口还支持 `action=search query=…`（可加 `pick=N` 直接打开第 N 处结果）、`action=export format=pdf|html path=…`、`action=compare`、`action=about`、`action=checkForUpdates`（可加 `background=1 autoDownload=1` 在后台下载、退出时安装），以及用 `action=windowSnapshot which=sheet|panel|about|front path=…` 截取表单、浮动面板、关于窗口或 Sparkle 的更新窗口等最前面的其他窗口。
 
 Quick Look 扩展随应用一起打包在 `Contents/PlugIns/`。在构建目录里调试时，需要先登记扩展；若同时装了其他提供 Markdown 预览的 App（如 MarkEdit），系统可能优先用它们的扩展，可在「系统设置 → 通用 → 登录项与扩展 → Quick Look」里调整：
 
@@ -134,6 +153,7 @@ qlmanage -p fixtures/showcase.md
 | 文件监听 | FSEvents |
 | 导出与打印 | 预览页交出整篇 HTML，原生端内联样式、字体和图片；PDF 由不显示的 WKWebView 按纸张分页 |
 | Quick Look | 沙盒 App 扩展（`Sources/SilkQuickLook/`），加载同一套预览页 |
+| 自动更新 | Sparkle 2，EdDSA 签名的 appcast，托管在 GitHub Release |
 | 应用图标 | Icon Composer 分层图标，见 [品牌资源说明](Resources/Brand/README.md) |
 
 主要目录：`Sources/Silk/` 为原生应用，`Sources/SilkQuickLook/` 为 Quick Look 扩展，`web/src/` 为预览源码，`Resources/` 为打包资源，`Tests/SilkTests/` 和 `web/test/` 为测试，`scripts/` 为构建及调试脚本。
