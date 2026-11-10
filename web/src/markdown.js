@@ -317,7 +317,9 @@ function fencePlugin(md) {
   };
 }
 
-const md = new MarkdownIt({ html: true, linkify: true, breaks: false })
+// breaks: true —— 回车一次就换行（和 Obsidian、GitHub 评论一样），空一行才分段。
+// 标准 Markdown 会把单个换行并成一段、中间加个空格：边写边看时左右对不上，中文句子里还会多出空格。
+const md = new MarkdownIt({ html: true, linkify: true, breaks: true })
   .use(frontMatterPlugin)
   .use(footnote)
   .use(tasklist, { disabled: true, label: false })

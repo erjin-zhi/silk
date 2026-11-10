@@ -181,3 +181,9 @@ test('大文档里没显示出来的块，也能按 HTML 锚点找到', () => {
   // Markdown 标题照常能找到。
   assert.equal(anchorBlockIndex(blocks, ids, '锚点'), 0);
 });
+
+test('回车一次就换行，空一行才分段，中文行之间不插空格', () => {
+  resetBlocks();
+  const { blocks } = renderBlocks('你好 你好你\n你\n\n你好\n\n你\n你行');
+  assert.deepEqual(blocks.map((b) => b.html.trim()), ['<p>你好 你好你<br>\n你</p>', '<p>你好</p>', '<p>你<br>\n你行</p>']);
+});
