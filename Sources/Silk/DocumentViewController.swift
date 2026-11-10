@@ -115,6 +115,14 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
             completion?(true)
             return
         }
+        // 差异对照还开着（比如在 Finder 里又双击了同一文件夹里的文件）：不换文档。
+        // 换了的话，表单上的「存储我的修改」「载入磁盘版本」会落到另一份文件上。
+        if comparing != nil {
+            NSSound.beep()
+            view.window?.makeKeyAndOrderFront(nil)
+            completion?(false)
+            return
+        }
         confirmLeaving { [weak self] ok in
             guard let self, ok else {
                 completion?(false)
@@ -166,7 +174,7 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
 
     /// 自动保存（切走窗口、App 进后台、⌘S）。存不下来时不打断用户，在顶部提示。
     func saveIfNeeded() {
-        guard isDirty, let session else { return }
+        guard isDirty, comparing == nil, let session else { return }
         handle(session.save(editor.string))
     }
 
@@ -395,11 +403,11 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         fileURL.map { $0.deletingPathExtension().lastPathComponent } ?? "未命名"
     }
 
-    /// 生成完整的导出 HTML。
-    func exportHTML(_ completion: @escaping (Result<String, any Error>) -> Void) {
+    /// 生成完整的导出 HTML。destination 是要存到的文件，本地链接按它改成相对地址；打印、PDF 不给。
+    func exportHTML(destination: URL? = nil, _ completion: @escaping (Result<String, any Error>) -> Void) {
         let fallback = exportFallbackTitle
         preview.exportBody { result in
-            completion(result.map { HTMLExport.document($0, fallbackTitle: fallback) })
+            completion(result.map { HTMLExport.document($0, fallbackTitle: fallback, destination: destination) })
         }
     }
 
@@ -453,6 +461,32 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         isDirty = false
         hideBanner()
         preview.update(text)
+    }
+
+    /// 差异对照正开着的那份文档；nil 表示没在比较。
+    /// 开着期间不自动保存（表单一盖上来窗口就失去焦点，会触发「切走窗口就存」，用户还没决定留哪一边，
+    /// 磁盘原文就先被覆盖了），也不换文档。
+    private var comparing: DocumentSession?
+    var isComparing: Bool { comparing != nil }
+
+    /// 打开差异对照前调用：记下比的是哪一份。
+    func beginComparing() {
+        comparing = session
+    }
+
+    /// 差异对照关了。用户的选择只用在当初比的那一份上；文档已经不是那一份了就不动。
+    func finishComparing(_ choice: DiffSheet.Choice) {
+        let compared = comparing
+        comparing = nil
+        guard let compared, compared === session else {
+            if choice != .close { NSSound.beep() }
+            return
+        }
+        switch choice {
+        case .keepMine: keepMyChanges()
+        case .loadDisk: loadDiskVersion()
+        case .close: break
+        }
     }
 
     /// 横幅上点了「比较」。

@@ -17,7 +17,8 @@ enum FolderSearch {
     struct Result: Sendable {
         var matches: [Match] = []
         var fileCount = 0
-        /// 结果太多，后面的没列出来。
+        /// 结果太多，有命中没列出来（总数到顶，或某个文件超过了单个文件的上限）。
+        /// 这时 matches.count、fileCount 都只是列出来的部分，不是实际总数。
         var truncated = false
     }
 
@@ -36,15 +37,17 @@ enum FolderSearch {
             // 太大的不是给人看的 Markdown（日志、导出的数据），不进去找。
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
             guard size <= 20 << 20, let text = try? TextFile.read(url).text else { continue }
-            let found = matches(of: query, in: text, url: url, max: min(perFile, limit - result.matches.count + 1))
-            guard !found.isEmpty else { continue }
-            result.fileCount += 1
-            result.matches += found
-            if result.matches.count > limit {
-                result.matches.removeLast(result.matches.count - limit)
-                result.truncated = true
-                break
+            // 多找一处：找到的比要的多，就说明这里还有没列出来的。
+            let wanted = min(perFile, limit - result.matches.count)
+            let found = matches(of: query, in: text, url: url, max: wanted + 1)
+            if found.count > wanted { result.truncated = true }
+            let kept = found.prefix(wanted)
+            if !kept.isEmpty {
+                result.fileCount += 1
+                result.matches += kept
             }
+            // 总数到顶了，后面的文件不用再看。
+            if result.truncated, result.matches.count >= limit { break }
         }
         return result
     }

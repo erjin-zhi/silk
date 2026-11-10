@@ -541,7 +541,18 @@ function reveal(line) {
 // ---------- 导出：完整的 HTML 正文 ----------
 
 /** 把整篇渲染好（大文档的占位块、还没画的图表都补上），返回干净的正文 HTML。图表一律用浅色主题。 */
-async function exportHTML() {
+async function exportHTML(source) {
+  // 原生端给的是编辑器里最新的全文，网页里可能还差最后一次编辑。
+  if (typeof source === 'string' && source !== text) render(source);
+  // 下面要等图表画完，期间可能换了文档、<base> 指向别的目录：图片、链接的地址按现在这篇的目录来算。
+  const baseHref = base.href;
+  const absolute = (value) => {
+    try {
+      return new URL(value, baseHref).href;
+    } catch {
+      return value;
+    }
+  };
   materializeAll();
   const clone = root.cloneNode(true);
   clone.className = 'markdown-body';
@@ -587,9 +598,20 @@ async function exportHTML() {
   for (const el of clone.querySelectorAll('.cursor-block, .search-flash')) el.classList.remove('cursor-block', 'search-flash');
   for (const el of clone.querySelectorAll('[data-l]')) el.removeAttribute('data-l');
   for (const el of clone.querySelectorAll('[style]')) if (el.classList.contains('blk')) el.removeAttribute('style');
-  // 本地图片换成绝对地址（silk-file:///…），原生端再把它嵌进文件里。
-  for (const img of clone.querySelectorAll('img[src]')) img.setAttribute('src', img.src);
-  for (const el of clone.querySelectorAll('video[src], source[src]')) el.setAttribute('src', el.src);
+  // 作者写的脚本、事件属性不带进导出文件：导出的 HTML 会在浏览器里打开。
+  for (const el of clone.querySelectorAll('script, iframe, object, embed')) el.remove();
+  for (const el of clone.querySelectorAll('*')) {
+    for (const attr of [...el.attributes]) {
+      if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+      else if (/^(href|src|xlink:href|action|formaction)$/i.test(attr.name) && /^\s*javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
+    }
+  }
+  // 本地图片、链接换成绝对地址（silk-file:///…），原生端再把图片嵌进文件、链接按导出位置改写。
+  for (const el of clone.querySelectorAll('img[src], video[src], source[src]')) el.setAttribute('src', absolute(el.getAttribute('src')));
+  for (const a of clone.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href');
+    if (!href.startsWith('#')) a.setAttribute('href', absolute(href));
+  }
 
   const h1 = clone.querySelector('h1');
   return {

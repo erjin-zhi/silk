@@ -57,25 +57,27 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
         pending.forEach { $0.resume() }
     }
 
-    /// UTF-8（可带 BOM）、UTF-16（带 BOM），都不是就当 GB18030（国内老文档常见）。
+    /// 和 App 用同一套编码探测（TextFile.swift 是 App 那份的软链接），同一个文件在两边看到的字一样。
     static func read(_ url: URL) throws -> String {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
-           let text = String(data: data, encoding: .utf16) {
-            return text
-        }
-        if let text = String(data: data, encoding: .utf8) {
-            return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
-        }
-        let gb = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
-        return String(data: data, encoding: gb) ?? String(decoding: data, as: UTF8.self)
+        try TextFile.read(url).text
     }
 
     // MARK: - 网页
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], body["type"] as? String == "ready" else { return }
-        markReady()
+        guard let body = message.body as? [String: Any] else { return }
+        switch body["type"] as? String {
+        case "ready":
+            markReady()
+        case "copy":
+            // 预览页点「复制」后按钮马上显示「已复制」，这边得真的放进剪贴板。
+            if let text = body["text"] as? String {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        default:
+            break
+        }
     }
 
     func webView(

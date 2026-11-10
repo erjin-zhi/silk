@@ -36,6 +36,25 @@ import Testing
         #expect(result.truncated)
     }
 
+    @Test func perFileCapIsReportedAsTruncated() {
+        let dir = TempDir()
+        let a = dir.write("a.md", String(repeating: "x\n", count: 5))
+        let b = dir.write("b.md", "x")
+        let result = FolderSearch.search("x", in: [a, b], limit: 100, perFile: 3)
+        #expect(result.matches.count == 4)
+        #expect(result.fileCount == 2)
+        #expect(result.truncated)
+    }
+
+    @Test func exactlyAtTheLimitIsNotTruncated() {
+        let dir = TempDir()
+        let a = dir.write("a.md", String(repeating: "x\n", count: 10))
+        let b = dir.write("b.md", "无关")
+        let result = FolderSearch.search("x", in: [a, b], limit: 10)
+        #expect(result.matches.count == 10)
+        #expect(!result.truncated)
+    }
+
     @Test func emptyQueryFindsNothing() {
         let dir = TempDir()
         let file = dir.write("a.md", "abc")
@@ -103,6 +122,27 @@ import Testing
         #expect(!out.contains("silk-file:"))
     }
 
+    @Test func localLinksBecomeRelativeToTheExportedFile() {
+        let dir = TempDir()
+        let doc = dir.write("notes/其他 文章.md", "x")
+        var components = URLComponents()
+        components.scheme = "silk-file"
+        components.host = ""
+        components.path = doc.path
+        components.fragment = "小节"
+        let html = "<a href=\"\(components.url!.absoluteString)\">x</a>"
+        let out = HTMLExport.embedLocalFiles(in: html, destination: dir.url.appending(path: "export/a.html"))
+        #expect(out.contains("href=\"../notes/%E5%85%B6%E4%BB%96%20%E6%96%87%E7%AB%A0.md#%E5%B0%8F%E8%8A%82\""))
+        // 不给导出位置（打印、PDF）就用绝对地址。
+        #expect(HTMLExport.embedLocalFiles(in: html).contains("href=\"file:///"))
+    }
+
+    @Test func exportedDocumentDoesNotRunScripts() {
+        let doc = HTMLExport.document(HTMLExport.Body(html: "<p>x</p>", title: "", math: false), fallbackTitle: "x")
+        #expect(doc.contains("Content-Security-Policy"))
+        #expect(doc.contains("script-src 'none'"))
+    }
+
     @Test func documentHasTitleAndStyles() {
         let body = HTMLExport.Body(html: "<h1>你好 & 再见</h1>", title: "你好 & 再见", math: false)
         let doc = HTMLExport.document(body, fallbackTitle: "文件")
@@ -142,5 +182,82 @@ import Testing
             }
         }
         #expect(renderer.finished == nil)
+    }
+}
+
+
+@MainActor
+@Suite struct CompareWithDiskTests {
+    /// 打开差异对照时窗口会失去焦点；这时的自动保存不能把磁盘原文换成编辑器内容。
+    @Test func openingTheDiffDoesNotOverwriteTheDisk() throws {
+        let dir = TempDir()
+        let file = dir.write("a.md", "原文")
+        let controller = WorkspaceWindowController(root: dir.url, initialFile: file)
+        defer { controller.window?.close() }
+        let textView = try #require(controller.docView.view.firstSubview(of: EditorView.self)).textView
+        let end = NSRange(location: (textView.string as NSString).length, length: 0)
+        if textView.shouldChangeText(in: end, replacementString: "，我的修改") {
+            textView.replaceCharacters(in: end, with: "，我的修改")
+            textView.didChangeText()
+        }
+        #expect(controller.docView.isDirty)
+
+        controller.compareWithDisk(nil)
+        controller.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
+        controller.saveIfNeeded()  // App 进后台
+        #expect(dir.read("a.md") == "原文")
+
+        // 退出时也不能替用户存。
+        var answer: Bool?
+        controller.confirmClosing { answer = $0 }
+        #expect(answer == false)
+        #expect(dir.read("a.md") == "原文")
+
+        // 看完选「存储我的修改」才写盘，之后自动保存恢复。
+        let sheet = try #require(controller.contentViewController?.presentedViewControllers?.first as? DiffSheet)
+        let keep = try #require(sheet.view.firstSubview(of: NSButton.self) { $0.title == "存储我的修改" })
+        keep.performClick(nil)
+        #expect(dir.read("a.md") == "原文，我的修改")
+        #expect(!controller.docView.isComparing)
+    }
+
+    /// 对照开着时从 Finder 打开同一文件夹里的另一份文件：不换文档，旧表单的选择也落不到别的文件上。
+    @Test func staleDiffCannotTouchAnotherFile() throws {
+        let dir = TempDir()
+        let a = dir.write("a.md", "原文")
+        let b = dir.write("b.md", "另一份")
+        let controller = WorkspaceWindowController(root: dir.url, initialFile: a)
+        defer { controller.window?.close() }
+        let textView = try #require(controller.docView.view.firstSubview(of: EditorView.self)).textView
+        let end = NSRange(location: (textView.string as NSString).length, length: 0)
+        if textView.shouldChangeText(in: end, replacementString: "，我的修改") {
+            textView.replaceCharacters(in: end, with: "，我的修改")
+            textView.didChangeText()
+        }
+        controller.compareWithDisk(nil)
+
+        var opened: Bool?
+        controller.docView.open(b) { opened = $0 }
+        #expect(opened == false)
+        #expect(controller.docView.fileURL?.path == a.path)
+        #expect(dir.read("a.md") == "原文")
+
+        // 表单上的选择只落在 a 上，b 不受影响。
+        let sheet = try #require(controller.contentViewController?.presentedViewControllers?.first as? DiffSheet)
+        try #require(sheet.view.firstSubview(of: NSButton.self) { $0.title == "存储我的修改" }).performClick(nil)
+        #expect(dir.read("a.md") == "原文，我的修改")
+        #expect(dir.read("b.md") == "另一份")
+
+        // 表单关了，照常能换文档。
+        controller.openFile(b)
+        #expect(controller.docView.fileURL?.path == b.path)
+    }
+}
+
+private extension NSView {
+    func firstSubview<T: NSView>(of type: T.Type, where match: (T) -> Bool = { _ in true }) -> T? {
+        if let view = self as? T, match(view) { return view }
+        for sub in subviews { if let found = sub.firstSubview(of: type, where: match) { return found } }
+        return nil
     }
 }

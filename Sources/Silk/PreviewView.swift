@@ -201,7 +201,16 @@ final class PreviewController: NSObject, WKNavigationDelegate {
     /// 导出用的正文：整篇都渲染好，图表用浅色主题画好。
     func exportBody(_ completion: @escaping (Result<HTMLExport.Body, any Error>) -> Void) {
         guard ready else { return completion(.failure(CocoaError(.featureUnsupported))) }
-        webView.callAsyncJavaScript("return await silk.exportHTML()", arguments: [:], in: nil, in: .page) { result in
+        // 最后一次编辑可能还在路上（上一次更新没回来，这一次排在 pendingUpdate 里没发出去）。
+        // 把最新全文一起交过去，网页里先换成它再导出，排着的那次就不用再发了。
+        let latest = lastDocument?.text
+        if let latest {
+            pendingUpdate = nil
+            sentText = latest as NSString
+        }
+        webView.callAsyncJavaScript(
+            "return await silk.exportHTML(text)", arguments: ["text": latest ?? NSNull()], in: nil, in: .page
+        ) { result in
             switch result {
             case .success(let value):
                 guard let dict = value as? [String: Any], let html = dict["html"] as? String else {

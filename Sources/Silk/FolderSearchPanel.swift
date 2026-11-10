@@ -186,7 +186,9 @@ final class FolderSearchPanel: NSObject, NSTableViewDataSource, NSTableViewDeleg
         if matches.isEmpty {
             status.stringValue = "没有找到「\(query)」"
         } else {
-            status.stringValue = "\(result.fileCount) 个文件中共 \(matches.count)\(result.truncated ? "+" : "") 处结果"
+            status.stringValue = result.truncated
+                ? "结果太多，只列出 \(result.fileCount) 个文件中的 \(matches.count) 处，换个更具体的词试试"
+                : "\(result.fileCount) 个文件中共 \(matches.count) 处结果"
         }
     }
 

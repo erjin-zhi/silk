@@ -143,6 +143,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     /// 关窗口、退出前：当前文档的修改存得下来就直接放行，存不下来问用户。
     func confirmClosing(_ proceed: @escaping (Bool) -> Void) {
+        // 差异对照还开着：用户正在决定留哪一边，不能替他存。先把窗口拿到前面，让他看完再说。
+        if docView.isComparing && docView.isDirty {
+            NSSound.beep()
+            window?.makeKeyAndOrderFront(nil)
+            return proceed(false)
+        }
         docView.confirmLeaving(proceed)
     }
 
@@ -296,7 +302,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     @objc func exportHTML(_ sender: Any?) {
         chooseExportLocation("html") { [weak self] url in
-            self?.docView.exportHTML { result in
+            self?.docView.exportHTML(destination: url) { result in
                 do {
                     try Data(result.get().utf8).write(to: url, options: .atomic)
                 } catch {
@@ -348,12 +354,11 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     @objc func compareWithDisk(_ sender: Any?) {
         guard !isDraft, let url = docView.fileURL, let window, window.attachedSheet == nil else { return }
+        // 先记下比的是哪一份再弹表单：表单出现时窗口失去焦点，会走 windowDidResignKey 的自动保存；
+        // 表单开着时也可能从 Finder 打开别的文件。选择只作用在这一份上。
+        docView.beginComparing()
         let sheet = DiffSheet(fileName: url.lastPathComponent, disk: docView.diskText(), mine: docView.text) { [weak self] choice in
-            switch choice {
-            case .keepMine: self?.docView.keepMyChanges()
-            case .loadDisk: self?.docView.loadDiskVersion()
-            case .close: break
-            }
+            self?.docView.finishComparing(choice)
         }
         window.contentViewController?.presentAsSheet(sheet)
     }

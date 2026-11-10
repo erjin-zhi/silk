@@ -14,7 +14,11 @@ enum HTMLExport {
         var math: Bool
     }
 
-    static func document(_ body: Body, fallbackTitle: String, resources: URL? = Resources.previewDirectory) -> String {
+    /// destination：导出的 HTML 要存到哪个文件。给了就把没嵌进去的本地文件（链接、太大的图片）写成相对它的地址，
+    /// 文件夹整体搬走也还能点开；不给（打印、PDF）就写成绝对的 file:// 地址。
+    static func document(
+        _ body: Body, fallbackTitle: String, resources: URL? = Resources.previewDirectory, destination: URL? = nil
+    ) -> String {
         let title = body.title.isEmpty ? fallbackTitle : body.title
         var styles: [String] = []
         if body.math, let resources, let katex = try? String(contentsOf: resources.appending(path: "katex/katex.min.css"), encoding: .utf8) {
@@ -31,18 +35,25 @@ enum HTMLExport {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="generator" content="Silk">
+        <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
         <title>\(escape(title))</title>
         \(styles.map { "<style>\n\($0)\n</style>" }.joined(separator: "\n"))
         </head>
         <body data-mode="read">
         <main class="markdown-body">
-        \(embedLocalFiles(in: body.html))
+        \(embedLocalFiles(in: body.html, destination: destination))
         </main>
         </body>
         </html>
 
         """
     }
+
+    /// 导出的页面不运行任何脚本：正文里作者写的 <script>、onerror= 之类在浏览器里打开时都不执行。
+    /// 样式、图片、字体照常加载。
+    static let contentSecurityPolicy =
+        "default-src 'none'; script-src 'none'; object-src 'none'; frame-src 'none'; "
+        + "style-src 'unsafe-inline'; font-src data:; img-src * data: blob: file:; media-src * data: blob: file:"
 
     /// 导出页额外的样式：底部不用留半屏空白，打印时代码自动换行、标题不落在页底。
     static let extraCSS = """
@@ -128,8 +139,9 @@ enum HTMLExport {
 
     // MARK: - 图片
 
-    /// 正文里 silk-file:///… 的本地文件换成 data: 地址嵌进去；太大的退回成 file:// 地址。
-    static func embedLocalFiles(in html: String, maxSize: Int = 25 << 20) -> String {
+    /// 正文里 silk-file:///… 的本地文件：图片换成 data: 地址嵌进去；链接和太大的图片改成指向原文件的地址
+    /// （给了 destination 就是相对导出文件的路径，否则是 file:// 绝对地址）。
+    static func embedLocalFiles(in html: String, maxSize: Int = 25 << 20, destination: URL? = nil) -> String {
         html.replacing(/(src|href)="silk-file:\/\/([^"]*)"/) { match in
             let attribute = String(match.1)
             let raw = String(match.2).replacingOccurrences(of: "&amp;", with: "&")
@@ -137,11 +149,28 @@ enum HTMLExport {
             let file = URL(fileURLWithPath: url.path)
             let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? .max
             guard attribute == "src", size <= maxSize, let data = try? Data(contentsOf: file) else {
-                return "\(attribute)=\"\(escape(file.absoluteString))\""
+                var address = destination.map { relativePath(from: $0.deletingLastPathComponent(), to: file) }
+                    ?? file.absoluteString
+                if let query = url.query(percentEncoded: true) { address += "?" + query }
+                if let fragment = url.fragment(percentEncoded: true) { address += "#" + fragment }
+                return "\(attribute)=\"\(escape(address))\""
             }
             let mime = UTType(filenameExtension: file.pathExtension.lowercased())?.preferredMIMEType ?? "application/octet-stream"
             return "\(attribute)=\"data:\(mime);base64,\(data.base64EncodedString())\""
         }
+    }
+
+    /// 从 directory 到 file 的相对路径（URL 编码过，可以直接放进 href / src）。
+    static func relativePath(from directory: URL, to file: URL) -> String {
+        let from = directory.standardizedFileURL.pathComponents
+        let to = file.standardizedFileURL.pathComponents
+        var common = 0
+        while common < min(from.count, to.count), from[common] == to[common] { common += 1 }
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#;")
+        let parts = Array(repeating: "..", count: from.count - common)
+            + to[common...].map { $0.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0 }
+        return parts.isEmpty ? "." : parts.joined(separator: "/")
     }
 
     static func escape(_ text: String) -> String {

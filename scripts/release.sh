@@ -35,6 +35,12 @@ ditto -c -k --norsrc --keepParent "$APP" "$ZIP"
   --embed-release-notes \
   "$DIST"
 
+# generate_appcast 每次都按这一版的前缀重写 DIST 里所有旧版本的下载地址（旧版 zip 会变成指向 v<新版本>/Silk-<旧版本>.zip，
+# 那个 Release 里并没有它）。用默认的 GitHub 地址时，按文件名里的版本号把每一项改回它自己那个 Release。
+if [[ -z "${SILK_DOWNLOAD_PREFIX:-}" ]]; then
+  sed -E -i '' "s#https://github.com/$REPO/releases/download/v[^/\"]+/Silk-([^/\"]+)\.zip#https://github.com/$REPO/releases/download/v\1/Silk-\1.zip#g" "$DIST/appcast.xml"
+fi
+
 echo "已生成 $ZIP（构建 $BUILD）和 $DIST/appcast.xml"
 
 if [[ "${1:-}" == "--publish" ]]; then
