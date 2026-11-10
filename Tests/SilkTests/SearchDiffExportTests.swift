@@ -1,5 +1,6 @@
 import AppKit
 import Testing
+import UniformTypeIdentifiers
 @testable import Silk
 
 /// 文件夹搜索、与磁盘版本比较、导出 HTML 的纯逻辑部分。
@@ -157,8 +158,10 @@ import Testing
 }
 
 @Suite struct DefaultAppTests {
-    @Test func defaultAppTypesIncludeStandardMarkdownAndNoDynamicTypes() {
+    @Test func defaultAppTypesOnlyCoverMdAndMarkdown() {
         let types = MarkdownFiles.defaultAppTypes
+        let expected = Set(["md", "markdown"].compactMap { UTType(filenameExtension: $0) }.filter { !$0.isDynamic })
+        #expect(Set(types) == expected)
         #expect(types.contains { $0.identifier == "net.daringfireball.markdown" })
         #expect(!types.contains { $0.isDynamic })
         #expect(Set(types).count == types.count)

@@ -254,9 +254,10 @@ extension AppDelegate {
 
 extension AppDelegate {
     /// 把 Silk 设成 Markdown 文件的默认打开方式。系统会弹框请用户确认。
+    /// 已经归 Silk 的类型不再设，免得重复弹框；全都是 Silk 时菜单项是灰的，点不到这里。
     @objc func makeDefaultMarkdownApp(_ sender: Any?) {
         let app = Bundle.main.bundleURL
-        let types = MarkdownFiles.defaultAppTypes
+        let types = MarkdownFiles.defaultAppTypes.filter { !MarkdownFiles.isDefaultApp(app, for: $0) }
         Task { @MainActor in
             var failed: (any Error)?
             for type in types {
@@ -267,7 +268,8 @@ extension AppDelegate {
                 }
             }
             let alert = NSAlert()
-            if MarkdownFiles.isDefaultApp(app) {
+            // 系统没报错就算设好了：刚设完那一下查询结果可能还没更新，不能只凭它判断。
+            if failed == nil || MarkdownFiles.isDefaultApp(app) {
                 alert.messageText = "Silk 已是 Markdown 文件的默认打开方式"
                 alert.informativeText = "在 Finder 里双击 .md 文件会用 Silk 打开。想换回别的 App，可以在 Finder 的「显示简介」→「打开方式」里修改。"
             } else {
@@ -287,7 +289,11 @@ extension AppDelegate {
         if menuItem.action == #selector(makeDefaultMarkdownApp(_:)) {
             // swift run 直接跑可执行文件时没有 App 包，设不了。
             guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return false }
-            menuItem.state = MarkdownFiles.isDefaultApp(Bundle.main.bundleURL) ? .on : .off
+            // 已经是默认就打勾并置灰：系统没有「取消默认」的说法，再点只会重新弹框。
+            // 想换回别的 App，在 Finder 的「显示简介」→「打开方式」里改。
+            let isDefault = MarkdownFiles.isDefaultApp(Bundle.main.bundleURL)
+            menuItem.state = isDefault ? .on : .off
+            return !isDefault
         }
         return true
     }
