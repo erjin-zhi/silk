@@ -47,6 +47,7 @@ enum MainMenu {
 
     private static func fileMenu() -> NSMenu {
         let menu = NSMenu(title: "文件")
+        menu.addItem(item("新建草稿", #selector(AppDelegate.newDraft(_:)), "n"))
         menu.addItem(item("打开…", #selector(AppDelegate.openDocument(_:)), "o"))
 
         // 带 clearRecentDocuments: 的子菜单会被 NSDocumentController 自动填充。

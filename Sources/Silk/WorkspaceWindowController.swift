@@ -1,9 +1,11 @@
 import AppKit
 
-/// 一个窗口：左边文件树，右边文档。
+/// 一个窗口：左边文件树，右边文档。草稿窗口没有文件树，打开就能写。
 @MainActor
 final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
     let workspace: Workspace
+    /// 草稿窗口：文档是 App 数据目录里的草稿，还没存到用户选的位置。
+    let isDraft: Bool
     private let splitController = NSSplitViewController()
     private let sidebar = SidebarViewController()
     let docView = DocumentViewController()
@@ -13,13 +15,38 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private lazy var quickOpenPanel = QuickOpenPanel()
 
     var onClose: (() -> Void)?
+    /// 窗口里打开的文件变了，App 记下来，下次启动恢复。
+    var onStateChange: (() -> Void)?
+    /// 草稿存到了新位置，交给 App 用普通窗口打开它。
+    var onDraftSaved: ((URL) -> Void)?
+    /// 侧栏点了「新建」，参数是从哪个窗口新建的。
+    var onNewDraft: ((WorkspaceWindowController) -> Void)?
+
+    enum DraftChoice { case save, delete, cancel }
+
+    /// 关闭有内容的草稿时问用户。默认弹系统提示；测试里换成直接回答。
+    lazy var promptForDraft: (@escaping (DraftChoice) -> Void) -> Void = { [weak self] answer in
+        self?.showDraftAlert(answer)
+    }
+
+    /// 选草稿存到哪儿。默认弹存储面板；测试里换成直接给位置。
+    lazy var chooseSaveLocation: (String, @escaping (URL?) -> Void) -> Void = { [weak self] name, done in
+        self?.showSavePanel(suggestedName: name, done)
+    }
+
+    private let drafts: DraftStore
+    /// 草稿存储时默认放到哪个文件夹：从哪个文件夹窗口新建的，就默认存回那里。
+    var saveDirectory: URL?
 
     private static let modeItem = NSToolbarItem.Identifier("mode")
     private static let quickOpenItem = NSToolbarItem.Identifier("quickOpen")
+    private static let newDraftItem = NSToolbarItem.Identifier("newDraft")
 
-    init(root: URL, initialFile: URL?, fragment: String? = nil) {
+    init(root: URL, initialFile: URL?, fragment: String? = nil, draft: Bool = false, drafts: DraftStore = .standard) {
         workspace = Workspace(root: root)
         self.initialFile = initialFile
+        self.isDraft = draft
+        self.drafts = drafts
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
@@ -42,10 +69,15 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(contentItem)
         let hasSavedSidebar = UserDefaults.standard.object(forKey: "NSSplitView Subview Frames SilkSidebar") != nil
-        splitController.splitView.autosaveName = "SilkSidebar"
+        // 草稿窗口收起侧栏，也不记侧栏状态（不然普通窗口的侧栏也跟着收起来）。
+        if !draft { splitController.splitView.autosaveName = "SilkSidebar" }
         window.contentViewController = splitController
         window.setContentSize(NSSize(width: 1180, height: 780))
-        if !hasSavedSidebar { splitController.splitView.setPosition(250, ofDividerAt: 0) }
+        if draft {
+            sidebarItem.isCollapsed = true
+        } else if !hasSavedSidebar {
+            splitController.splitView.setPosition(250, ofDividerAt: 0)
+        }
 
         let toolbar = NSToolbar(identifier: "SilkToolbar")
         toolbar.delegate = self
@@ -64,11 +96,23 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         docView.onOpenLink = { [weak self] url, wiki in self?.openLink(url, wiki: wiki) }
 
         workspace.onTreeChange = { [weak self] in self?.treeDidChange() }
-        workspace.onFilesChange = { [weak self] paths in self?.docView.filesDidChange(paths) }
+        workspace.onFilesChange = { [weak self] paths in
+            self?.docView.filesDidChange(paths)
+            self?.sidebar.filesDidChange(paths)
+        }
+        sidebar.onNew = { [weak self] in
+            guard let self else { return }
+            self.onNewDraft?(self)
+        }
         workspace.start()
 
         updateTitle()
         if let initialFile { openFile(initialFile, fragment: fragment) }
+        if draft {
+            docView.autosaveWhileTyping = true
+            // 草稿是用来写的：阅读模式下临时换成对照（不改掉用户平时的默认模式）。
+            if docView.mode == .read { docView.setMode(.split, remember: false) }
+        }
         DebugHooks.log("窗口已创建")
     }
 
@@ -87,8 +131,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             }
             self.sidebar.select(url)
             self.updateTitle()
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            if !self.isDraft { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
             self.quickOpenPanel.noteOpened(url)
+            self.onStateChange?()
         }
     }
 
@@ -117,7 +162,11 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     private func updateTitle() {
         guard let window else { return }
-        if let file = docView.fileURL {
+        if isDraft {
+            window.title = "未命名"
+            window.subtitle = "草稿"
+            window.representedURL = nil
+        } else if let file = docView.fileURL {
             window.title = file.lastPathComponent
             let folder = workspace.relativePath(of: file.deletingLastPathComponent())
             let rootName = workspace.root.lastPathComponent
@@ -168,7 +217,66 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     // MARK: - 菜单动作
 
-    @objc func saveDocument(_ sender: Any?) { docView.saveIfNeeded() }
+    @objc func saveDocument(_ sender: Any?) {
+        if isDraft { saveDraftAs() } else { docView.saveIfNeeded() }
+    }
+
+    // MARK: - 草稿
+
+    /// 草稿里有没有写东西。
+    var draftIsEmpty: Bool {
+        docView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 把草稿存到用户选的位置，之后它就是普通文件，草稿删掉。completion 收到是否存成了。
+    func saveDraftAs(completion: ((Bool) -> Void)? = nil) {
+        guard isDraft else { return completion?(false) ?? () }
+        docView.saveIfNeeded()
+        let text = docView.text
+        chooseSaveLocation(DraftStore.suggestedName(for: text)) { [weak self] url in
+            guard let self, let url else { return completion?(false) ?? () }
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+            } catch {
+                self.window.map { NSAlert(error: error).beginSheetModal(for: $0) }
+                return completion?(false) ?? ()
+            }
+            if let draft = self.docView.fileURL { self.drafts.delete(draft) }
+            self.closeWithoutAsking = true
+            self.window?.close()
+            self.onDraftSaved?(url)
+            completion?(true)
+        }
+    }
+
+    /// 草稿已经存走或删掉了，关窗口时不用再问。
+    private var closeWithoutAsking = false
+
+    private func showSavePanel(suggestedName: String, _ done: @escaping (URL?) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+        panel.directoryURL = saveDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        guard let window else { return done(nil) }
+        panel.beginSheetModal(for: window) { response in done(response == .OK ? panel.url : nil) }
+    }
+
+    private func showDraftAlert(_ answer: @escaping (DraftChoice) -> Void) {
+        guard let window else { return answer(.cancel) }
+        let alert = NSAlert()
+        alert.messageText = "要存储这份草稿吗？"
+        alert.informativeText = "不存储的话，草稿会被删除。"
+        alert.addButton(withTitle: "存储…")
+        alert.addButton(withTitle: "删除草稿")
+        alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: window) { response in
+            switch response {
+            case .alertFirstButtonReturn: answer(.save)
+            case .alertSecondButtonReturn: answer(.delete)
+            default: answer(.cancel)
+            }
+        }
+    }
 
     @objc func revealInFinder(_ sender: Any?) {
         NSWorkspace.shared.activateFileViewerSelecting([docView.fileURL ?? workspace.root])
@@ -205,7 +313,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         case #selector(showReadMode(_:)): menuItem.state = docView.mode == .read ? .on : .off
         case #selector(showSplitMode(_:)): menuItem.state = docView.mode == .split ? .on : .off
         case #selector(showSourceMode(_:)): menuItem.state = docView.mode == .source ? .on : .off
-        case #selector(saveDocument(_:)): return docView.isDirty
+        case #selector(saveDocument(_:)):
+            menuItem.title = isDraft ? "存储…" : "存储"
+            return isDraft || docView.isDirty
+        case #selector(revealInFinder(_:)): return !isDraft
         case #selector(printDocument(_:)): return docView.fileURL != nil
         default: break
         }
@@ -215,6 +326,25 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     // MARK: - NSWindowDelegate
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if isDraft && !closeWithoutAsking {
+            // 空草稿直接关（关掉时删）；写了东西的问一下存不存。
+            if draftIsEmpty { return true }
+            docView.saveIfNeeded()
+            promptForDraft { [weak self] choice in
+                guard let self else { return }
+                switch choice {
+                case .save:
+                    self.saveDraftAs()
+                case .delete:
+                    if let draft = self.docView.fileURL { self.drafts.delete(draft) }
+                    self.closeWithoutAsking = true
+                    self.window?.close()
+                case .cancel:
+                    break
+                }
+            }
+            return false
+        }
         guard docView.isDirty else { return true }
         var decided: Bool?
         docView.confirmLeaving { [weak self] ok in
@@ -230,7 +360,11 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     func windowWillClose(_ notification: Notification) {
-        docView.saveIfNeeded()
+        if isDraft, draftIsEmpty, let draft = docView.fileURL {
+            drafts.delete(draft)
+        } else if !closeWithoutAsking {
+            docView.saveIfNeeded()
+        }
         workspace.stop()
         onClose?()
     }
@@ -242,7 +376,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     // MARK: - 工具栏
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, Self.modeItem, .flexibleSpace, Self.quickOpenItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, Self.modeItem, .flexibleSpace, Self.quickOpenItem, Self.newDraftItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -275,6 +409,15 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             item.toolTip = "快速打开（⇧⌘O）"
             item.target = self
             item.action = #selector(quickOpen(_:))
+            return item
+        case Self.newDraftItem:
+            // 和「备忘录」「邮件」的新建按钮同一个图标，一眼能看出是新建。
+            let item = NSToolbarItem(itemIdentifier: id)
+            item.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "新建草稿")
+            item.label = "新建"
+            item.toolTip = "新建草稿（⌘N）"
+            item.target = NSApp.delegate
+            item.action = #selector(AppDelegate.newDraft(_:))
             return item
         default:
             return nil

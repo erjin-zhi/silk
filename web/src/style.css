@@ -52,6 +52,7 @@ body {
 
 body[data-mode="split"] .markdown-body { padding: 28px 32px 40vh; }
 
+body[data-mode="split"] .markdown-body.empty::before { content: "在左边写，这里实时预览"; }
 .markdown-body.empty::before {
   content: "空文档";
   display: block;

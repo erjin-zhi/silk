@@ -1,6 +1,6 @@
 import AppKit
 
-/// 侧栏文件树：只显示 Markdown 文件和含有它们的文件夹。
+/// 侧栏文件树：只显示 Markdown 文件和含有它们的文件夹。每个文件右边标着修改时间，底部有「新建」。
 @MainActor
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private let outline = NSOutlineView()
@@ -10,8 +10,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var expanded: Set<URL> = []
     private var selected: URL?
     private var reloading = false
+    private let newButton = NSButton()
+    /// 文件的修改时间，只查屏幕上显示到的行；文件变了就清掉重查。
+    private var modified: [String: Date] = [:]
+    private var clock: Timer?
 
     var onSelect: ((URL) -> Void)?
+    /// 点「新建」。
+    var onNew: (() -> Void)?
 
     override func loadView() {
         view = NSView()
@@ -37,7 +43,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        // 底部给「新建」按钮让出位置，最后一行不会被它挡住。
+        scroll.automaticallyAdjustsContentInsets = true
         view.addSubview(scroll)
+
+        newButton.title = "新建"
+        newButton.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: nil)
+        newButton.imagePosition = .imageLeading
+        newButton.imageHugsTitle = true
+        newButton.bezelStyle = .glass
+        newButton.controlSize = .large
+        newButton.toolTip = "新建草稿（⌘N）"
+        newButton.target = self
+        newButton.action = #selector(newTapped)
+        newButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newButton)
 
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
@@ -54,7 +74,55 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -32),
+            newButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            newButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -14),
         ])
+        scroll.contentInsets.bottom = 56
+
+        // 「3 分钟前」这类时间每分钟刷新一次。
+        clock = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshVisibleDates() }
+        }
+    }
+
+    @objc private func newTapped() { onNew?() }
+
+    /// 文件夹里有文件变了：清掉这些文件的修改时间，重新显示。
+    func filesDidChange(_ paths: Set<String>) {
+        var changed = false
+        for path in paths {
+            if modified.removeValue(forKey: path) != nil { changed = true }
+            if path.hasPrefix("/private/"), modified.removeValue(forKey: String(path.dropFirst("/private".count))) != nil { changed = true }
+        }
+        if changed { refreshVisibleDates() }
+    }
+
+    private func refreshVisibleDates() {
+        let rows = outline.rows(in: outline.visibleRect)
+        guard rows.length > 0 else { return }
+        outline.reloadData(forRowIndexes: IndexSet(integersIn: rows.location..<NSMaxRange(rows)), columnIndexes: [0])
+    }
+
+    private func modificationDate(_ url: URL) -> Date? {
+        if let date = modified[url.path] { return date }
+        let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        if let date { modified[url.path] = date }
+        return date
+    }
+
+    /// 侧栏里显示的时间：刚刚、5 分钟前、14:32、昨天、10月28日、2025/10/28。
+    nonisolated static func timeLabel(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 60 { return "刚刚" }
+        if seconds < 3600 { return "\(Int(seconds / 60)) 分钟前" }
+        let time = date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        if calendar.isDate(date, inSameDayAs: now) { return time }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return "昨天"
+        }
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        if parts.year == calendar.component(.year, from: now) { return "\(parts.month!)月\(parts.day!)日" }
+        return "\(parts.year!)/\(parts.month!)/\(parts.day!)"
     }
 
     /// 换上新的文件树，保留展开状态和选中项。
@@ -140,7 +208,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let id = NSUserInterfaceItemIdentifier("cell")
         let cell = outlineView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView ?? makeCell(id)
         cell.textField?.stringValue = node.isDirectory ? node.name : displayName(node.name)
-        cell.textField?.toolTip = node.name
+        let dateLabel = (cell as? FileCell)?.date
+        if !node.isDirectory, let date = modificationDate(node.url) {
+            dateLabel?.stringValue = Self.timeLabel(for: date)
+            cell.toolTip = "\(node.name)\n修改于 \(date.formatted(date: .long, time: .shortened))"
+        } else {
+            dateLabel?.stringValue = ""
+            cell.toolTip = node.name
+        }
         cell.imageView?.image = NSImage(
             systemSymbolName: node.isDirectory ? "folder" : "doc.text", accessibilityDescription: nil
         )
@@ -156,8 +231,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         return name
     }
 
+    private final class FileCell: NSTableCellView {
+        let date = NSTextField(labelWithString: "")
+    }
+
     private func makeCell(_ id: NSUserInterfaceItemIdentifier) -> NSTableCellView {
-        let cell = NSTableCellView()
+        let cell = FileCell()
         cell.identifier = id
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
@@ -165,8 +244,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let text = NSTextField(labelWithString: "")
         text.translatesAutoresizingMaskIntoConstraints = false
         text.lineBreakMode = .byTruncatingMiddle
+        let date = cell.date
+        date.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        date.textColor = .secondaryLabelColor
+        date.alignment = .right
+        date.translatesAutoresizingMaskIntoConstraints = false
+        // 窄的时候先截文件名，时间完整显示。
+        date.setContentCompressionResistancePriority(.required, for: .horizontal)
+        date.setContentHuggingPriority(.required, for: .horizontal)
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         cell.addSubview(image)
         cell.addSubview(text)
+        cell.addSubview(date)
         cell.imageView = image
         cell.textField = text
         NSLayoutConstraint.activate([
@@ -174,8 +263,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             image.widthAnchor.constraint(equalToConstant: 16),
             text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            date.leadingAnchor.constraint(greaterThanOrEqualTo: text.trailingAnchor, constant: 6),
+            date.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+            date.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
         ])
         return cell
     }

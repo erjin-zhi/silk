@@ -331,11 +331,12 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - 模式
 
-    func setMode(_ newMode: ViewMode) {
+    /// remember：是否记成以后打开文档的默认模式。草稿临时切到能编辑的模式时不记。
+    func setMode(_ newMode: ViewMode, remember: Bool = true) {
         guard newMode != mode else { return }
         let old = mode
         mode = newMode
-        UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
+        if remember { UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey) }
         applyMode(animated: false)
 
         // 切过去时，让新露出来的那一边对齐到原来正在看的位置。
@@ -421,11 +422,29 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         view.window?.makeFirstResponder(editor.textView)
     }
 
+    /// 编辑器里现在的全文。
+    var text: String { editor.string }
+
+    /// 光标放进编辑器，可以直接打字。
+    func focusEditor() {
+        view.window?.makeFirstResponder(editor.textView)
+    }
+
+    /// 打字停下一会儿就自动保存。草稿用：草稿没有「切走窗口才存」的习惯，崩溃时也不能丢。
+    var autosaveWhileTyping = false
+    private var autosaveWork: DispatchWorkItem?
+
     // MARK: - NSTextViewDelegate
 
     func textDidChange(_ notification: Notification) {
         isDirty = true
         preview.update(editor.string)
+        if autosaveWhileTyping {
+            autosaveWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveIfNeeded() } }
+            autosaveWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        }
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
