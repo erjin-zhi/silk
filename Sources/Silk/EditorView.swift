@@ -3,7 +3,7 @@ import AppKit
 /// 源码编辑器：TextKit 1 的 NSTextView（大文件滚动稳定，行号和位置能精确换算）。
 @MainActor
 final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
-    let textView: NSTextView
+    let textView: MarkdownTextView
     let highlighter: MarkdownHighlighter
 
     /// 用户滚动编辑器时回调，参数是视口顶部对应的源码行（带小数）。
@@ -16,8 +16,9 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
 
     init(fontSize: CGFloat) {
         highlighter = MarkdownHighlighter(fontSize: fontSize)
-        textView = NSTextView(usingTextLayoutManager: false)
+        textView = MarkdownTextView(usingTextLayoutManager: false)
         super.init(frame: .zero)
+        textView.baseAttributes = { [highlighter] in highlighter.baseAttributes }
 
         hasVerticalScroller = true
         hasHorizontalScroller = false

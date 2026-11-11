@@ -88,6 +88,30 @@ enum DebugHooks {
                 tv.displayIfNeeded()
                 log(String(format: "原生按键处理：%.2f ms", (CACurrentMediaTime() - started) * 1000))
             }
+        case "key":
+            // 按一次菜单快捷键：{"action": "key", "chars": "2", "flags": "cmd"}，flags 可含 cmd ctrl opt shift。
+            // 调试实例一般不在前台、没有主窗口，所以自己找到菜单项，从这个窗口的第一响应者开始发。
+            guard let chars = info["chars"], let window else { return }
+            var flags: NSEvent.ModifierFlags = []
+            let names = (info["flags"] ?? "cmd").split(separator: " ")
+            if names.contains("cmd") { flags.insert(.command) }
+            if names.contains("ctrl") { flags.insert(.control) }
+            if names.contains("opt") { flags.insert(.option) }
+            if names.contains("shift") { flags.insert(.shift) }
+            func find(_ menu: NSMenu?) -> NSMenuItem? {
+                for item in menu?.items ?? [] {
+                    if let hit = find(item.submenu) { return hit }
+                    if item.keyEquivalent == chars, item.keyEquivalentModifierMask == flags { return item }
+                }
+                return nil
+            }
+            guard let item = find(NSApp.mainMenu), let action = item.action else { return log("快捷键 \(chars)：没对上") }
+            // 调试实例不是活跃应用时第一响应者常常不是编辑器，格式命令直接交给编辑器。
+            let editor = findEditor(in: window.contentView)?.textView
+            if let editor, editor.responds(to: action) { window.makeFirstResponder(editor) }
+            let done = window.firstResponder?.tryToPerform(action, with: item) == true
+                || controller?.tryToPerform(action, with: item) == true
+            log("快捷键 \(chars)（\(item.title)）：\(done ? "已处理" : "没人接")")
         case "sidebarSnapshot":
             guard let path = info["path"], let outline = findOutline(in: window?.contentView),
                   let scroll = outline.enclosingScrollView,

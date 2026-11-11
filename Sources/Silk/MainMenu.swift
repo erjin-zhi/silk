@@ -7,6 +7,7 @@ enum MainMenu {
         main.addItem(submenu(appMenu()))
         main.addItem(submenu(fileMenu()))
         main.addItem(submenu(editMenu()))
+        main.addItem(submenu(formatMenu()))
         main.addItem(submenu(viewMenu()))
         main.addItem(submenu(windowMenu()))
         return main
@@ -107,17 +108,58 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "显示")
-        menu.addItem(item("阅读", #selector(WorkspaceWindowController.showReadMode(_:)), "1"))
-        menu.addItem(item("对照", #selector(WorkspaceWindowController.showSplitMode(_:)), "2"))
-        menu.addItem(item("源码", #selector(WorkspaceWindowController.showSourceMode(_:)), "3"))
+        // ⌘1–⌘6 留给标题（同 Typora），模式切换用 ⌃⌘。
+        menu.addItem(item("阅读", #selector(WorkspaceWindowController.showReadMode(_:)), "1", [.command, .control]))
+        menu.addItem(item("对照", #selector(WorkspaceWindowController.showSplitMode(_:)), "2", [.command, .control]))
+        menu.addItem(item("源码", #selector(WorkspaceWindowController.showSourceMode(_:)), "3", [.command, .control]))
         menu.addItem(.separator())
         menu.addItem(item("显示侧栏", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]))
         menu.addItem(.separator())
+        // ⌘= / ⌘- / ⌘0 留给标题级别和正文（同 Typora），整体缩放用 ⇧⌘= / ⇧⌘- / ⇧⌘0。
+        // 带 ⇧ 的符号键要写成按出来的字符（+ _ )），写成 "=" 加 ⇧ 对不上键盘事件。
         menu.addItem(item("放大", #selector(WorkspaceWindowController.zoomIn(_:)), "+"))
-        menu.addItem(item("缩小", #selector(WorkspaceWindowController.zoomOut(_:)), "-"))
-        menu.addItem(item("实际大小", #selector(WorkspaceWindowController.zoomReset(_:)), "0"))
+        menu.addItem(item("缩小", #selector(WorkspaceWindowController.zoomOut(_:)), "_"))
+        menu.addItem(item("实际大小", #selector(WorkspaceWindowController.zoomReset(_:)), ")"))
+
+        let font = NSMenu(title: "编辑器字号")
+        font.addItem(item("增大", #selector(WorkspaceWindowController.editorFontBigger(_:)), "=", [.command, .option]))
+        font.addItem(item("减小", #selector(WorkspaceWindowController.editorFontSmaller(_:)), "-", [.command, .option]))
+        font.addItem(item("恢复默认", #selector(WorkspaceWindowController.editorFontReset(_:))))
+        let fontItem = NSMenuItem(title: "编辑器字号", action: nil, keyEquivalent: "")
+        fontItem.submenu = font
+        menu.addItem(fontItem)
         menu.addItem(.separator())
         menu.addItem(item("进入全屏幕", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]))
+        return menu
+    }
+
+    /// 格式菜单，菜单栏和编辑器右键菜单共用。快捷键沿用 Typora。
+    static func formatMenu() -> NSMenu {
+        typealias T = MarkdownTextView
+        let menu = NSMenu(title: "格式")
+        for level in 1...6 {
+            menu.addItem(item("标题 \(level)", #selector(T.formatHeading(_:)), "\(level)", tag: level))
+        }
+        menu.addItem(item("正文", #selector(T.formatHeading(_:)), "0", tag: 0))
+        menu.addItem(item("提升标题级别", #selector(T.formatPromoteHeading(_:)), "="))
+        menu.addItem(item("降低标题级别", #selector(T.formatDemoteHeading(_:)), "-"))
+        menu.addItem(.separator())
+        menu.addItem(item("粗体", #selector(T.formatBold(_:)), "b"))
+        menu.addItem(item("斜体", #selector(T.formatItalic(_:)), "i"))
+        menu.addItem(item("下划线", #selector(T.formatUnderline(_:)), "u"))
+        // ⌃⇧`：写成 "`" 加 ⇧ 会连 ⌃` 一起吞掉，要写成按出来的 ~。
+        menu.addItem(item("删除线", #selector(T.formatStrikethrough(_:)), "~", .control))
+        menu.addItem(item("行内代码", #selector(T.formatInlineCode(_:)), "`", .control))
+        menu.addItem(item("链接", #selector(T.formatLink(_:)), "k"))
+        menu.addItem(item("图片", #selector(T.formatImage(_:)), "i", [.command, .control]))
+        menu.addItem(.separator())
+        menu.addItem(item("引用", #selector(T.formatQuote(_:)), "q", [.command, .option]))
+        menu.addItem(item("有序列表", #selector(T.formatOrderedList(_:)), "o", [.command, .option]))
+        menu.addItem(item("无序列表", #selector(T.formatBulletList(_:)), "u", [.command, .option]))
+        menu.addItem(item("任务列表", #selector(T.formatTaskList(_:)), "x", [.command, .option]))
+        menu.addItem(item("代码块", #selector(T.formatCodeBlock(_:)), "c", [.command, .option]))
+        menu.addItem(item("表格", #selector(T.formatTable(_:)), "t", [.command, .option]))
+        menu.addItem(item("分隔线", #selector(T.formatHorizontalRule(_:))))
         return menu
     }
 

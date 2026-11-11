@@ -277,9 +277,13 @@ details[open]:not(.callout):not(.front-matter) > summary { margin-bottom: 0.5em;
 
 /* 对照模式：光标所在块 */
 body[data-mode="split"] .blk { cursor: text; }
+/* 整块淡淡铺一层底色。以前是块左边一道竖线，单行标题旁边看着像光标停在行首。
+   向外的 box-shadow 把底色撑出去一圈，不改排版。 */
 .cursor-block {
-  border-radius: 4px;
-  box-shadow: -14px 0 0 -11px var(--accent);
+  --cursor-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 6px;
+  background-color: var(--cursor-tint);
+  box-shadow: 0 0 0 6px var(--cursor-tint);
 }
 
 /* ---------- 代码高亮：GitHub 风格 ---------- */

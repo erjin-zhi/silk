@@ -406,6 +406,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     @objc func zoomIn(_ sender: Any?) { docView.changeZoom(by: 1) }
     @objc func zoomOut(_ sender: Any?) { docView.changeZoom(by: -1) }
     @objc func zoomReset(_ sender: Any?) { docView.changeZoom(by: 0) }
+    @objc func editorFontBigger(_ sender: Any?) { docView.changeEditorFontSize(by: 1) }
+    @objc func editorFontSmaller(_ sender: Any?) { docView.changeEditorFontSize(by: -1) }
+    @objc func editorFontReset(_ sender: Any?) { docView.changeEditorFontSize(by: 0) }
 
     @objc func quickOpen(_ sender: Any?) {
         guard let window else { return }
@@ -435,6 +438,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         case #selector(printDocument(_:)), #selector(exportHTML(_:)), #selector(exportPDF(_:)): return docView.fileURL != nil
         case #selector(compareWithDisk(_:)): return !isDraft && docView.fileURL != nil
         case #selector(findInFolder(_:)): return !isDraft
+        case #selector(editorFontBigger(_:)):
+            return docView.editorFontSize < DocumentViewController.editorFontSizeRange.upperBound
+        case #selector(editorFontSmaller(_:)):
+            return docView.editorFontSize > DocumentViewController.editorFontSizeRange.lowerBound
         default: break
         }
         return true
@@ -513,9 +520,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
                 labels: ["阅读", "对照", "源码"], target: self, action: #selector(modeChanged(_:))
             )
             group.label = "模式"
-            group.subitems[0].toolTip = "阅读（⌘1）"
-            group.subitems[1].toolTip = "对照（⌘2）"
-            group.subitems[2].toolTip = "源码（⌘3）"
+            group.subitems[0].toolTip = "阅读（⌃⌘1）"
+            group.subitems[1].toolTip = "对照（⌃⌘2）"
+            group.subitems[2].toolTip = "源码（⌃⌘3）"
             modeGroup = group
             updateModeControl(docView.mode)
             return group

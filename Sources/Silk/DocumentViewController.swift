@@ -18,6 +18,8 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
     }
     private(set) var mode: ViewMode
     private var zoom: CGFloat
+    /// 编辑区的基础字号（缩放 1 倍时），和整体缩放分开调。
+    private(set) var editorFontSize: CGFloat
 
     /// 预览顶部所在的行，切模式和回到这个文件时用。
     private var previewTopLine: Double = 0
@@ -34,13 +36,20 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
 
     private static let modeKey = "viewMode"
     private static let zoomKey = "zoom"
+    private static let editorFontSizeKey = "editorFontSize"
+    static let defaultEditorFontSize: CGFloat = 15
+    static let editorFontSizeRange: ClosedRange<CGFloat> = 11...28
 
     init() {
         // 没选过模式时用对照（左边写、右边预览）；选过就用上次的。
         mode = ViewMode(rawValue: UserDefaults.standard.string(forKey: Self.modeKey) ?? "") ?? .split
         let savedZoom = UserDefaults.standard.double(forKey: Self.zoomKey)
         zoom = savedZoom > 0 ? savedZoom : 1
-        editor = EditorView(fontSize: 13 * zoom)
+        let savedSize = CGFloat(UserDefaults.standard.double(forKey: Self.editorFontSizeKey))
+        editorFontSize = savedSize > 0
+            ? min(max(savedSize, Self.editorFontSizeRange.lowerBound), Self.editorFontSizeRange.upperBound)
+            : Self.defaultEditorFontSize
+        editor = EditorView(fontSize: editorFontSize * zoom)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -391,7 +400,16 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
         zoom = step == 0 ? 1 : levels[max(0, min(levels.count - 1, index + step))]
         UserDefaults.standard.set(zoom, forKey: Self.zoomKey)
         preview.setZoom(zoom)
-        editor.setFontSize(13 * zoom)
+        editor.setFontSize(editorFontSize * zoom)
+    }
+
+    /// 只调编辑区字号，预览不动。step 为 0 时恢复默认。
+    func changeEditorFontSize(by step: Int) {
+        let range = Self.editorFontSizeRange
+        let size = step == 0 ? Self.defaultEditorFontSize : editorFontSize + CGFloat(step)
+        editorFontSize = min(max(size, range.lowerBound), range.upperBound)
+        UserDefaults.standard.set(Double(editorFontSize), forKey: Self.editorFontSizeKey)
+        editor.setFontSize(editorFontSize * zoom)
     }
 
     // MARK: - 打印与导出
@@ -549,6 +567,8 @@ final class DocumentViewController: NSViewController, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         isDirty = true
         preview.update(editor.string)
+        // 格式命令是先挪选区、后通知改了文字：那次标记打在旧的块上，预览重画后就没了，这里补一次。
+        if mode == .split, fileURL != nil { preview.highlightLine(editor.caretLine) }
         if autosaveWhileTyping {
             autosaveWork?.cancel()
             let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveIfNeeded() } }
