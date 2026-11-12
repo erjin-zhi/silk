@@ -4,11 +4,11 @@
 
 一款 macOS 原生的 Markdown 查看与编辑器，重在查看，也能随手写。面向「AI 生成了一堆 Markdown，翻起来不方便」的日常：打开文件夹就能浏览，切到对照模式就能修改。
 
-当前版本为 `0.2.0`，处于持续开发中。以下说明对应当前源码；最低系统为 **macOS 27**，打包脚本目前生成 **Apple Silicon（arm64）** 应用。
+当前版本为 `0.2.1`，处于持续开发中。以下说明对应当前源码；最低系统为 **macOS 27**，打包脚本目前生成 **Apple Silicon（arm64）** 应用。
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/erjin-zhi/silk/releases/latest) 下载 `Silk-0.2.0.zip`，解压后将 `Silk.app` 拖入「应用程序」文件夹。后续版本可通过「Silk → 检查更新…」更新。
+从 [GitHub Releases](https://github.com/erjin-zhi/silk/releases/latest) 下载 `Silk-0.2.1.zip`，解压后将 `Silk.app` 拖入「应用程序」文件夹。后续版本可通过「Silk → 检查更新…」更新。
 
 当前安装包使用 ad-hoc 签名，尚未经过 Apple 公证，首次启动可能被 macOS 安全检查拦截。
 
