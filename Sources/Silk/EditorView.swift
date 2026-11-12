@@ -13,12 +13,15 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
     private var lineIndexStale = true
     private var programmaticScroll = false
     private var suppressHighlight = false
+    /// 改过、还没重新着色的范围（随后续编辑平移）。
+    private var pendingHighlight: NSRange?
 
     init(fontSize: CGFloat) {
         highlighter = MarkdownHighlighter(fontSize: fontSize)
         textView = MarkdownTextView(usingTextLayoutManager: false)
         super.init(frame: .zero)
         textView.baseAttributes = { [highlighter] in highlighter.baseAttributes }
+        textView.willFinishChange = { [unowned self] in flushHighlight() }
 
         hasVerticalScroller = true
         hasHorizontalScroller = false
@@ -82,6 +85,7 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         storage.setAttributedString(NSAttributedString(string: text, attributes: highlighter.baseAttributes))
         storage.endEditing()
         suppressHighlight = false
+        pendingHighlight = nil
         highlighter.highlightAll(storage)
         textView.undoManager?.removeAllActions()
         textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -107,6 +111,7 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         let origin = contentView.bounds.origin
         lineIndexStale = true
         textView.textStorage?.replaceCharacters(in: range, with: replacement)
+        flushHighlight()
         textView.undoManager?.removeAllActions()
         let delta = newLength - oldLength
         var location = selection.location
@@ -124,8 +129,10 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         if let storage = textView.textStorage { highlighter.highlightAll(storage) }
     }
 
-    // 必须在 willProcessEditing 里着色：这一步改的属性会并进这次编辑交给排版器的失效范围。
-    // 放在 didProcessEditing 里改，排版器收不到新打的字的失效通知，字在却显示不出来（从空文档开始打字时整行空白）。
+    // 着色不放在这次编辑里做：在 willProcessEditing 改属性会把改动范围扩到整段，NSTextView 按改动范围的末尾放光标，
+    // 行中间打字光标就跳到段尾（行内代码里打一个字就跑到 ` 外面）。
+    // 也不能在 didProcessEditing 里改：排版器收不到失效通知，字在却显示不出来（从空文档开始打字时整行空白）。
+    // 所以这里只记下范围，等 NSTextView 处理完这次输入（didChangeText）再单独做一次只改属性的编辑。
     func textStorage(
         _ textStorage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions,
         range editedRange: NSRange, changeInLength delta: Int
@@ -133,7 +140,32 @@ final class EditorView: NSScrollView, @preconcurrency NSTextStorageDelegate {
         guard editedMask.contains(.editedCharacters) else { return }
         lineIndexStale = true
         guard !suppressHighlight else { return }
-        highlighter.textDidEdit(textStorage, editedRange: editedRange, delta: delta)
+        let range = highlighter.textDidEdit(textStorage, editedRange: editedRange, delta: delta)
+        if let pending = pendingHighlight {
+            pendingHighlight = NSUnionRange(Self.shift(pending, by: editedRange, delta: delta), range)
+        } else {
+            pendingHighlight = range
+            // 不经过 NSTextView 的改动（撤销、直接改文本存储）也要着色：兜底放到下一轮循环。
+            DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.flushHighlight() } }
+        }
+    }
+
+    /// 把之前记下的范围按这次编辑平移：editedRange 是改动后的范围，delta 是长度变化。
+    private static func shift(_ range: NSRange, by editedRange: NSRange, delta: Int) -> NSRange {
+        let oldEnd = NSMaxRange(editedRange) - delta
+        func map(_ i: Int) -> Int {
+            if i >= oldEnd { return i + delta }
+            return min(i, NSMaxRange(editedRange))
+        }
+        let start = map(range.location)
+        return NSRange(location: start, length: max(0, map(NSMaxRange(range)) - start))
+    }
+
+    /// 给改过的地方重新着色。
+    func flushHighlight() {
+        guard let range = pendingHighlight, let storage = textView.textStorage else { return }
+        pendingHighlight = nil
+        highlighter.restyle(storage, in: range)
     }
 
     // MARK: - 行号

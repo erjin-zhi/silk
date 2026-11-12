@@ -101,7 +101,9 @@ final class MarkdownHighlighter {
     // MARK: - 增量
 
     /// 在 NSTextStorage 处理编辑时调用：editedRange 是改动后的范围，delta 是长度变化。
-    func textDidEdit(_ storage: NSTextStorage, editedRange: NSRange, delta: Int) {
+    /// 只更新代码块范围，返回需要重新着色的范围，由调用方等这次编辑处理完后交给 restyle。
+    /// 不能在这次编辑里直接改属性：那会把改动范围扩到整段，NSTextView 打完字按改动范围的末尾放光标，光标就跳到段尾。
+    func textDidEdit(_ storage: NSTextStorage, editedRange: NSRange, delta: Int) -> NSRange {
         let text = storage.string as NSString
         let oldEditEnd = editedRange.location + editedRange.length - delta
         let paragraph = text.paragraphRange(for: editedRange)
@@ -120,8 +122,7 @@ final class MarkdownHighlighter {
             if old.count != fences.count || zip(old, fences).contains(where: { $0.start != $1.start || ($0.close == nil) != ($1.close == nil) }) {
                 // 代码块结构变了：从改动处往后整段重新着色。
                 let start = text.paragraphRange(for: NSRange(location: min(editedRange.location, text.length), length: 0)).location
-                apply(storage, in: NSRange(location: start, length: text.length - start))
-                return
+                return NSRange(location: start, length: text.length - start)
             }
         } else {
             // 只平移代码块范围。
@@ -133,7 +134,19 @@ final class MarkdownHighlighter {
                 return f
             }
         }
+        return paragraph
+    }
+
+    /// 单独作为一次只改属性的编辑重新着色（只改属性不会挪光标）。range 会扩到整段。
+    func restyle(_ storage: NSTextStorage, in range: NSRange) {
+        let length = storage.length
+        guard length > 0 else { return }
+        let start = min(range.location, length)
+        let clamped = NSRange(location: start, length: min(NSMaxRange(range), length) - start)
+        let paragraph = (storage.string as NSString).paragraphRange(for: clamped)
+        storage.beginEditing()
         apply(storage, in: paragraph)
+        storage.endEditing()
     }
 
     // MARK: - 着色

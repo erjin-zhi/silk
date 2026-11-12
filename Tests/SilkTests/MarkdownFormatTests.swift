@@ -115,6 +115,29 @@ struct MarkdownFormatTests {
         #expect(tv.string == "你好")
     }
 
+    /// 着色不能把光标挤到段尾：行内代码里连续打字都留在 ` 里面，行中间打字、删字光标不动。
+    @Test func 行中间打字光标不跳到段尾() {
+        let editor = EditorView(fontSize: 15)
+        editor.setText("")
+        let tv = editor.textView
+        tv.isEditable = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = editor
+        tv.formatInlineCode(nil)
+        for c in ["i", "m", "p"] { tv.insertText(c, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        #expect(tv.string == "`imp`")
+        #expect(tv.selectedRange() == NSRange(location: 4, length: 0))
+        // 着色照常生效。
+        #expect(tv.textStorage?.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor == .systemPink)
+
+        tv.setSelectedRange(NSRange(location: 2, length: 0))
+        tv.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(tv.selectedRange() == NSRange(location: 3, length: 0))
+        tv.deleteBackward(nil)
+        #expect(tv.string == "`imp`")
+        #expect(tv.selectedRange() == NSRange(location: 2, length: 0))
+    }
+
     @Test func 编辑器字号单独调且有上下限() {
         let doc = DocumentViewController()
         doc.changeEditorFontSize(by: 0)

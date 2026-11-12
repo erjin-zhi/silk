@@ -265,6 +265,13 @@ enum MarkdownFormat {
 final class MarkdownTextView: NSTextView {
     /// 插入新文字用的属性（着色器会再改）。
     var baseAttributes: () -> [NSAttributedString.Key: Any] = { [:] }
+    /// 每次改完文字、发出改动通知之前调用（编辑器在这里补着色）。
+    var willFinishChange: () -> Void = {}
+
+    override func didChangeText() {
+        willFinishChange()
+        super.didChangeText()
+    }
 
     private var canFormat: Bool { isEditable && !isHiddenOrHasHiddenAncestor }
 
